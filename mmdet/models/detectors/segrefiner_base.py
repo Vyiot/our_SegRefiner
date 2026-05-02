@@ -1,5 +1,7 @@
 from collections import OrderedDict
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.distributed as dist
 import numpy as np
 from mmcv.runner import BaseModule
@@ -43,10 +45,21 @@ class SegRefiner(BaseModule):
         self.betas_cumprod = np.linspace(
             betas['start'], betas['stop'], 
             betas['num_timesteps'])
+        
+        # Đảm bảo betas_cumprod luôn giảm dần (Từ Sạch đến Bẩn)
+        # Sạch (t=0, beta lớn) -> Bẩn (t=T, beta nhỏ)
+        if self.betas_cumprod[0] < self.betas_cumprod[-1]:
+            self.betas_cumprod = self.betas_cumprod[::-1]
+
         betas_cumprod_prev = self.betas_cumprod[:-1]
         self.betas_cumprod_prev = np.insert(betas_cumprod_prev, 0, 1)
         self.betas = self.betas_cumprod / self.betas_cumprod_prev
         self.num_timesteps = self.betas_cumprod.shape[0]
+        # [NEW] Đọc cấu hình các thành phần nhiễu (Ablation Study)
+        noise_cfg = diffusion_cfg.get('noise_components', {})
+        self.use_obj = noise_cfg.get('use_obj', False)
+        self.use_bnd = noise_cfg.get('use_bnd', False)
+        self.use_unc = noise_cfg.get('use_unc', False)
     
     def forward(self, img_metas, return_loss=True, **kwargs):
         """Calls either :func:`forward_train` or :func:`forward_test` depending
@@ -68,7 +81,11 @@ class SegRefiner(BaseModule):
             if self.task == 'instance':
                 return self.simple_test_instance(img_metas, **kwargs)
             elif self.task == 'semantic':
-                return self.simple_test_semantic(img_metas, **kwargs)
+                kw = dict(kwargs)
+                img = kw.pop('object_img', kw.pop('img', None))
+                coarse_masks = kw.pop('object_coarse_masks', kw.pop('coarse_masks', None))
+                gt_masks = kw.pop('object_gt_masks', kw.pop('gt_masks', None))
+                return self.simple_test_semantic(img_metas, img=img, coarse_masks=coarse_masks, gt_masks=gt_masks, **kw)
             else:
                 raise ValueError(f'unsupported task type: {self.task}')
     
@@ -80,10 +97,29 @@ class SegRefiner(BaseModule):
         pred_logits = self.denoise_model(z_t, t) 
         iou_pred = self.cal_iou(target, pred_logits)
         losses = dict()
-        losses['loss_mask'] = self.loss_mask(pred_logits, target)
-        losses['loss_texture'] = self.loss_texture(pred_logits, target)
+        # Tỷ lệ 2:1 (Lấp đầy : Biên)
+        losses['loss_mask'] = self.loss_mask(pred_logits, target) * 2.0
+        
+        # [NEW] Texture Loss: L1 on gradients (Eq. in Section III-A)
+        alpha = 1.0
+        losses['loss_texture'] = self._get_texture_loss(pred_logits.sigmoid(), target) * alpha
+        
         losses['iou'] = iou_pred.mean()
         return losses
+
+    def _get_texture_loss(self, pred, target):
+        """Tính L1 loss giữa gradient của dự đoán và GT."""
+        def gradient(x):
+            h_x = x.size()[-2]
+            w_x = x.size()[-1]
+            r = F.pad(x, (0, 1, 0, 1), mode='replicate')
+            g_x = r[:, :, :h_x, 1:] - r[:, :, :h_x, :w_x]
+            g_y = r[:, :, 1:, :w_x] - r[:, :, :h_x, :w_x]
+            return torch.abs(g_x) + torch.abs(g_y)
+
+        grad_pred = gradient(pred)
+        grad_gt = gradient(target)
+        return F.l1_loss(grad_pred, grad_gt)
     
     def get_train_input(self, object_img, object_gt_masks, object_coarse_masks,
                         patch_img=None, patch_gt_masks=None, patch_coarse_masks=None):
@@ -238,10 +274,10 @@ class SegRefiner(BaseModule):
         cur_fine_probs = cur_fine_probs + (1 - cur_fine_probs) * p_c_to_f
         return pred_logits, cur_fine_probs
     
-    def simple_test_instance(img_metas, **kwargs):
+    def simple_test_instance(self, img_metas, **kwargs):
         raise NotImplementedError
     
-    def simple_test_semantic(img_metas, **kwargs):
+    def simple_test_semantic(self, img_metas, **kwargs):
         raise NotImplementedError
     
 

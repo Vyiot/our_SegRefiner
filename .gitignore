@@ -26,8 +26,6 @@ wheels/
 MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -115,12 +113,24 @@ checkpoints
 *.log.json
 docs/modelzoo_statistics.md
 mmdet/.mim
+
+# Bỏ qua work_dirs (output training)
 work_dirs/
-figures
-.DS_Store
+
+# Bỏ qua file ảnh
 *.png
 *.jpg
+*.jpeg
 *.zip
+
+# Bỏ qua file py lẻ ở root
+check_empty_labels.py
+compare_unc_methods.py
+count_noise.py
+visualize_coarse_process.py
+visualize_coarse_real.py
+visualize_full_steps.py
+visualize_precomputed.py
 
 # Pytorch
 *.pth

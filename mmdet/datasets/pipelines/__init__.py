@@ -9,7 +9,8 @@ from .instaboost import InstaBoost
 from .loading import (FilterAnnotations, LoadAnnotations, LoadImageFromFile,
                       LoadImageFromWebcam, LoadMultiChannelImageFromFiles,
                       LoadPanopticAnnotations, LoadProposals,
-                      LoadCoarseMasks, LoadPatchData, LoadObjectData)
+                      LoadCoarseMasks, LoadPatchData, LoadObjectData,
+                      LoadOEMCoarseMasks)
 from .test_time_aug import MultiScaleFlipAug
 from .transforms import (Albu, CopyPaste, CutOut, Expand, MinIoURandomCrop,
                          MixUp, Mosaic, Normalize, Pad, PhotoMetricDistortion,
@@ -29,5 +30,5 @@ __all__ = [
     'EqualizeTransform', 'BrightnessTransform', 'ContrastTransform',
     'Translate', 'RandomShift', 'Mosaic', 'MixUp', 'RandomAffine',
     'YOLOXHSVRandomAug', 'CopyPaste', 'LoadCoarseMasks', 
-    'LoadPatchData', 'LoadObjectData'
+    'LoadPatchData', 'LoadObjectData', 'LoadOEMCoarseMasks'
 ]

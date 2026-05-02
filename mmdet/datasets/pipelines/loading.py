@@ -730,6 +730,9 @@ class LoadObjectData:
         y_any = mask.any(axis=1)
         x = np.where(x_any)[0]
         y = np.where(y_any)[0]
+        if len(x) == 0 or len(y) == 0:
+            # Truong hop anh khong co toa nha, tra ve toan bo kich thuoc anh
+            return 0, 0, mask.shape[1], mask.shape[0]
         x_1, x_2 = x[0], x[-1] + 1
         y_1, y_2 = y[0], y[-1] + 1
         return x_1, y_1, x_2, y_2
@@ -749,25 +752,50 @@ class LoadObjectData:
         object_w = min(x_2 - x_1 + self.pad_size, w)
         x_1_ob, x_2_ob = self._get_object_crop_coor(x_1, x_2, w, object_w)
         y_1_ob, y_2_ob = self._get_object_crop_coor(y_1, y_2, h, object_h)
+        
+        # [NEW] Lưu tọa độ để sau này dán lại vào ảnh gốc
+        results['crop_bbox'] = np.array([y_1_ob, x_1_ob, y_2_ob, x_2_ob], dtype=np.int32)
+        
         results['object_img'] = results['img'][y_1_ob: y_2_ob, x_1_ob: x_2_ob, :]
         object_gt_mask = results['gt_masks'].masks[:, y_1_ob: y_2_ob, x_1_ob: x_2_ob]
         results['object_gt_masks'] = BitmapMasks(object_gt_mask, object_gt_mask.shape[-2], object_gt_mask.shape[-1])
         object_coarse_mask = results['coarse_masks'].masks[:, y_1_ob: y_2_ob, x_1_ob: x_2_ob]
         results['object_coarse_masks'] = BitmapMasks(object_coarse_mask, object_coarse_mask.shape[-2], object_coarse_mask.shape[-1])
+        # Crop unc_map và edge_map theo cùng tọa độ (để q_sample dùng cho Eq. 6-11)
+        if 'unc_map' in results:
+            results['object_unc_map'] = results['unc_map'][y_1_ob: y_2_ob, x_1_ob: x_2_ob]
+        if 'edge_map' in results:
+            results['object_edge_map'] = results['edge_map'][y_1_ob: y_2_ob, x_1_ob: x_2_ob]
         return results
 
     def __call__(self, results):
         results = self.ramdom_crop_object(results)
-        del results['ann_info']
-        del results['mask_fields']
-        results['mask_fields'] = ['object_gt_masks', 'object_coarse_masks']
-        del results['img']
+        # Giữ lại các key cũ nhưng cập nhật shape
         results['img_shape'] = results['object_img'].shape
         results['ori_shape'] = results['object_img'].shape
-        del results['img_fields']
         results['img_fields'] = ['object_img']
-        del results['gt_masks']
-        del results['coarse_masks']
+        results['mask_fields'] = ['object_gt_masks', 'object_coarse_masks']
+
+        # Resize unc_map và edge_map về 256×256 để khớp với object_img sau bước Resize
+        # (Resize pipeline chỉ xử lý img_fields, không xử lý các map này)
+        TARGET = 256
+        if 'object_unc_map' in results:
+            results['object_unc_map'] = cv2.resize(
+                results['object_unc_map'], (TARGET, TARGET),
+                interpolation=cv2.INTER_LINEAR)
+        if 'object_edge_map' in results:
+            results['object_edge_map'] = cv2.resize(
+                results['object_edge_map'], (TARGET, TARGET),
+                interpolation=cv2.INTER_NEAREST)
+
+        # Cleanup các key thừa để tránh tốn memory/lỗi pipeline sau
+        if 'ann_info' in results: del results['ann_info']
+        if 'img' in results: del results['img']
+        if 'gt_masks' in results: del results['gt_masks']
+        if 'coarse_masks' in results: del results['coarse_masks']
+        if 'unc_map' in results: del results['unc_map']
+        if 'edge_map' in results: del results['edge_map']
+        
         return results
 
 @PIPELINES.register_module()
@@ -789,6 +817,9 @@ class LoadPatchData:
         y_any = mask.any(axis=1)
         x = np.where(x_any)[0]
         y = np.where(y_any)[0]
+        if len(x) == 0 or len(y) == 0:
+            # Truong hop anh khong co toa nha, tra ve toan bo kich thuoc anh
+            return 0, 0, mask.shape[1], mask.shape[0]
         x_1, x_2 = x[0], x[-1] + 1
         y_1, y_2 = y[0], y[-1] + 1
         return x_1, y_1, x_2, y_2
@@ -1026,3 +1057,203 @@ def modify_boundary(image, regional_sample_rate=0.1, sample_rate=0.1, move_rate=
     image = (image >= 0.5).astype(np.uint8)
     
     return image
+
+
+# ---------------------------------------------------------------------------
+# [NEW] LoadOEMCoarseMasks - Multi-Level Noise cho OpenEarthMap
+# ---------------------------------------------------------------------------
+
+@PIPELINES.register_module()
+class LoadOEMCoarseMasks:
+    """Tạo coarse mask đa cấp từ GT mask và ảnh RGB cho OpenEarthMap.
+
+    Ba thành phần nhiễu có thể bật/tắt độc lập qua các tham số:
+        use_obj (bool): Xóa các tòa nhà có độ bất định cao (Object-level noise).
+        use_bnd (bool): Làm nhòe biên dựa trên ảnh RGB thực tế (Boundary-level noise).
+        use_unc (bool): Tạo nhiễu ở các vùng nhập nhằng màu sắc (Uncertainty-level noise).
+
+    Khi tất cả đều False, sẽ dùng phương pháp gốc của SegRefiner (modify_boundary).
+
+    Args:
+        use_obj (bool): Bật Object-level noise. Mặc định True.
+        use_bnd (bool): Bật Boundary-level noise (Kornia Canny). Mặc định True.
+        use_unc (bool): Bật Uncertainty-level noise (GMM). Mặc định True.
+        obj_unc_threshold (float): Ngưỡng độ bất định để xóa tòa nhà. Mặc định 0.5.
+        canny_low  (float): Ngưỡng thấp Canny. Mặc định 0.1.
+        canny_high (float): Ngưỡng cao Canny. Mặc định 0.2.
+        bnd_dilate_ksize (int): Kích thước kernel để giãn biên. Mặc định 5.
+        test_mode (bool): True nếu là val/test (không tạo noise, load mask sẵn có).
+    """
+
+    def __init__(self,
+                 use_obj=True,
+                 use_bnd=True,
+                 use_unc=True,
+                 obj_unc_threshold=0.5,
+                 canny_low=0.1,
+                 canny_high=0.2,
+                 bnd_dilate_ksize=5,
+                 test_mode=False,
+                 pseudolabel_dir=None):
+        self.use_obj = use_obj
+        self.use_bnd = use_bnd
+        self.use_unc = use_unc
+        self.obj_unc_threshold = obj_unc_threshold
+        self.canny_low = canny_low
+        self.canny_high = canny_high
+        self.bnd_dilate_ksize = bnd_dilate_ksize
+        self.test_mode = test_mode
+        self.pseudolabel_dir = pseudolabel_dir  # thư mục chứa pseudolabels thật
+
+    def __call__(self, results):
+        img = results['img']           # (H, W, 3), RGB, uint8
+        
+        seg = results['gt_semantic_seg']
+        gt_mask = (seg == 1).astype(np.uint8)
+
+        if self.test_mode:
+            if self.pseudolabel_dir is not None:
+                # Load pseudolabel từ thư mục được chỉ định
+                basename = results.get('img_name', '')
+                if not basename:
+                    basename = osp.splitext(
+                        osp.basename(results.get('filename', ''))
+                    )[0] + '.tif'
+                pseudo_path = osp.join(self.pseudolabel_dir, basename)
+                if osp.exists(pseudo_path):
+                    pseudo_seg = cv2.imread(pseudo_path, cv2.IMREAD_GRAYSCALE)
+                    if pseudo_seg is None:
+                        pseudo_seg = gt_mask * 255
+                    coarse = (pseudo_seg > 0).astype(np.uint8)
+                else:
+                    # Fallback nếu không tìm thấy file
+                    coarse = gt_mask.copy()
+            else:
+                # Fallback: tạo coarse từ GT (cách cũ)
+                gt_255 = (gt_mask * 255).astype(np.uint8)
+                coarse = modify_boundary(gt_255)
+        else:
+            # Load precomputed maps từ file .npy (nếu có)
+            precomputed_unc  = None
+            precomputed_edge = None
+            img_path = results.get('filename', '') or results.get('img_info', {}).get('filename', '')
+            if img_path:
+                # img_path dạng: .../city/images/basename.tif
+                data_root = osp.dirname(osp.dirname(osp.dirname(img_path)))
+                city      = osp.basename(osp.dirname(osp.dirname(img_path)))
+                basename  = osp.splitext(osp.basename(img_path))[0]
+                unc_path  = osp.join(data_root, city, 'uncertainty', basename + '.npy')
+                edge_path = osp.join(data_root, city, 'edges',       basename + '.npy')
+                if osp.exists(unc_path):
+                    precomputed_unc  = np.load(unc_path)
+                if osp.exists(edge_path):
+                    precomputed_edge = np.load(edge_path)
+
+            coarse, uncertainty_map, edge_map = self._generate_multilevel_noise(
+                img, gt_mask,
+                precomputed_unc=precomputed_unc,
+                precomputed_edge=precomputed_edge
+            )
+            # Lưu raw maps để q_sample dùng cho t-dependent noise (Eq. 6-11)
+            results['unc_map'] = uncertainty_map.astype(np.float32)
+            results['edge_map'] = edge_map.astype(np.float32)
+
+        results['gt_masks'] = BitmapMasks([gt_mask], gt_mask.shape[0], gt_mask.shape[1])
+        results['coarse_masks'] = BitmapMasks([coarse], coarse.shape[0], coarse.shape[1])
+        results['mask_fields'] = ['gt_masks', 'coarse_masks']
+        return results
+
+    def _generate_multilevel_noise(self, img, gt_mask,
+                                    precomputed_unc=None,
+                                    precomputed_edge=None):
+        """Áp dụng các thành phần nhiễu đã chọn lên GT mask.
+
+        Luồng:
+          1. Bắt đầu với coarse = gt_mask.copy()
+          2. Nếu use_unc: tính U_score, lấy các vùng nhiễu
+          3. Nếu use_obj: xóa tòa nhà có U_score cao
+          4. Nếu use_bnd: thêm nhiễu biên dựa trên Canny RGB
+          5. Nếu tất cả False: dùng modify_boundary gốc
+
+        Returns:
+            tuple: (coarse_binary, uncertainty_map, edge_map)
+        """
+        from mmdet.models.utils.noise_utils import (
+            compute_gmm_uncertainty,
+            extract_building_instances,
+            get_rgb_edges_gpu
+        )
+
+        # Nếu tắt hết -> fallback về phương pháp gốc
+        if not self.use_obj and not self.use_bnd and not self.use_unc:
+            gt_255 = (gt_mask * 255).astype(np.uint8)
+            coarse = modify_boundary(gt_255)
+            h, w = gt_mask.shape
+            return coarse, np.zeros((h, w), dtype=np.float32), np.zeros((h, w), dtype=np.float32)
+
+        coarse = gt_mask.copy().astype(np.float32)
+
+        # ------------------------------------------------------------------ #
+        # Bước 1: Tính bản đồ độ bất định U_score (dùng cho cả Obj và Unc)
+        # ------------------------------------------------------------------ #
+        uncertainty_map = None
+        if self.use_obj or self.use_unc:
+            if precomputed_unc is not None:
+                uncertainty_map = precomputed_unc
+            else:
+                # Fallback: tính GMM on-the-fly nếu chưa precompute
+                uncertainty_map = compute_gmm_uncertainty(img)
+
+        # ------------------------------------------------------------------ #
+        # Bước 2: Object-level noise – xóa tòa nhà có U_score cao
+        # ------------------------------------------------------------------ #
+        if self.use_obj and uncertainty_map is not None:
+            from scipy import ndimage as ndi
+            labels, num_features = ndi.label(gt_mask.astype(np.int32))
+            if num_features > 0:
+                # Vectorized: tính mean uncertainty cho tất cả buildings cùng lúc
+                mean_uncs = np.array(ndi.mean(
+                    uncertainty_map, labels, range(1, num_features + 1)
+                ))
+                high_unc = np.where(mean_uncs > self.obj_unc_threshold)[0] + 1
+                if len(high_unc) > 0:
+                    coarse[np.isin(labels, high_unc)] = 0.0
+
+        # ------------------------------------------------------------------ #
+        # Bước 3: Uncertainty-level noise – thêm nhiễu vùng nhập nhằng
+        # ------------------------------------------------------------------ #
+        if self.use_unc and uncertainty_map is not None:
+            # print(f"  [DEBUG] Dang tinh Uncertainty noise...")
+            # Tạo nhiễu ngẫu nhiên tại các pixel có uncertainty cao
+            noise_sample = np.random.rand(*uncertainty_map.shape).astype(np.float32)
+            # Flip ngẫu nhiên giá trị pixel khi uncertainty > ngưỡng ngẫu nhiên
+            flip_mask = (noise_sample < uncertainty_map * 0.5).astype(np.float32)
+            coarse = np.abs(coarse - flip_mask)
+            coarse = np.clip(coarse, 0.0, 1.0)
+
+        # ------------------------------------------------------------------ #
+        # Bước 4: Boundary-level noise – làm nhòe biên dựa trên Canny RGB
+        # ------------------------------------------------------------------ #
+        if self.use_bnd:
+            if precomputed_edge is not None:
+                edge_np = precomputed_edge
+            else:
+                # Fallback: tính Canny on-the-fly nếu chưa precompute
+                gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+                low  = int(self.canny_low  * 255)
+                high = int(self.canny_high * 255)
+                edge_np = cv2.Canny(gray, low, high).astype(np.float32) / 255.0
+
+            # Giãn biên để tạo vùng mờ rộng hơn
+            kernel = np.ones((self.bnd_dilate_ksize, self.bnd_dilate_ksize),
+                             dtype=np.uint8)
+            edge_dilated = cv2.dilate(edge_np.astype(np.uint8), kernel)
+
+            # Flip giá trị pixel trong vùng biên với xác suất cao
+            bnd_noise = np.random.rand(*edge_dilated.shape).astype(np.float32)
+            flip_bnd = ((bnd_noise < 0.4) & (edge_dilated == 1)).astype(np.float32)
+            coarse = np.abs(coarse - flip_bnd)
+            coarse = np.clip(coarse, 0.0, 1.0)
+
+        coarse_binary = (coarse >= 0.5).astype(np.uint8)
+        return coarse_binary, uncertainty_map, edge_np

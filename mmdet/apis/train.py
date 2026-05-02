@@ -9,7 +9,7 @@ from mmcv.runner import (DistSamplerSeedHook, EpochBasedRunner,
                          Fp16OptimizerHook, OptimizerHook, build_runner,
                          get_dist_info)
 
-from mmdet.core import DistEvalHook, EvalHook, build_optimizer
+from mmdet.core import DistEvalHook, EvalHook, OEMBuildingEvalHook, build_optimizer
 from mmdet.datasets import (build_dataloader, build_dataset,
                             replace_ImageToTensor)
 from mmdet.utils import (build_ddp, build_dp, compat_cfg,
@@ -232,6 +232,41 @@ def train_detector(model,
         # priority of IterTimerHook has been modified from 'NORMAL' to 'LOW'.
         runner.register_hook(
             eval_hook(val_dataloader, **eval_cfg), priority='LOW')
+
+    # ── OEMBuildingEvalHook: always register for OEM datasets ──────────────
+    # Khác với EvalHook thông thường (chỉ chạy khi --validate),
+    # hook này luôn được bật khi dataset_type = 'OEMBuildingDataset'
+    # để hiển thị bảng IoU + Pseudo IoU mỗi N iters.
+    _oem_cfg = cfg.get('oem_eval', None)
+    if _oem_cfg is None and getattr(cfg.data.get('train', {}), 'type', None) == 'OEMBuildingDataset':
+        # Auto-detect OEM dataset
+        _oem_cfg = dict()
+    if _oem_cfg is not None:
+        # Build val dataloader (dùng riêng, không phụ thuộc --validate)
+        _val_dl_default = dict(
+            samples_per_gpu=1,
+            workers_per_gpu=2,
+            dist=distributed,
+            shuffle=False,
+            persistent_workers=False)
+        _val_dl_args = {**_val_dl_default, **cfg.data.get('val_dataloader', {})}
+        _val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))
+        _val_dataloader = build_dataloader(_val_dataset, **_val_dl_args)
+
+        _eval_interval = _oem_cfg.get('interval', cfg.get('eval_interval', 5000))
+        _data_root = _oem_cfg.get(
+            'data_root',
+            getattr(cfg.data.get('train', {}), 'data_root',
+                    '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'))
+        runner.register_hook(
+            OEMBuildingEvalHook(
+                dataloader=_val_dataloader,
+                data_root=_data_root,
+                interval=_eval_interval,
+                save_best=_oem_cfg.get('save_best', True),
+            ),
+            priority='LOW')
+    # ───────────────────────────────────────────────────────────────────────
 
     resume_from = None
     if cfg.resume_from is None and cfg.get('auto_resume'):

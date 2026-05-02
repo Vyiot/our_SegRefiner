@@ -354,6 +354,7 @@ class DenoiseUNet(BaseModule):
         num_heads=1,
         num_heads_upsample=-1,
         learn_time_embd=False,
+        num_timesteps=6,
         return_logits=False,
         use_scale_shift_norm=False
     ):
@@ -377,7 +378,7 @@ class DenoiseUNet(BaseModule):
         time_embed_dim = model_channels * 4
         self.learn_time_embd = learn_time_embd
         if learn_time_embd:
-            self.time_embed = nn.Embedding(6, time_embed_dim)
+            self.time_embed = nn.Embedding(num_timesteps, time_embed_dim)
         else:
             self.time_embed = nn.Sequential(
                 linear(model_channels, time_embed_dim),

@@ -22,6 +22,7 @@ from .coco_refine import CocoRefine
 from .hr_collection import HRCollectionDataset
 from .big import BigDataset
 from .dis import DISDataset
+from .oem_building import OEMBuildingDataset, OEMv2BuildingDataset
 
 __all__ = [
     'CustomDataset', 'XMLDataset', 'CocoDataset', 'DeepFashionDataset',
@@ -32,6 +33,7 @@ __all__ = [
     'build_dataset', 'replace_ImageToTensor', 'get_loading_pipeline',
     'NumClassCheckHook', 'CocoPanopticDataset', 'MultiImageMixDataset',
     'OpenImagesDataset', 'OpenImagesChallengeDataset', 'Objects365V1Dataset',
+    'OEMBuildingDataset', 'OEMv2BuildingDataset',
     'Objects365V2Dataset', 'OccludedSeparatedCocoDataset', 'LVISRefine',
-    'CocoRefine', 'HRCollectionDataset', 'BigDataset' , 'DISDataset'
+    'CocoRefine', 'HRCollectionDataset', 'BigDataset', 'DISDataset',
 ]

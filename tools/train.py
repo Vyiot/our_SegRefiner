@@ -5,6 +5,9 @@ import os
 import os.path as osp
 import time
 import warnings
+import os
+os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
+warnings.filterwarnings("ignore")
 
 import mmcv
 import torch

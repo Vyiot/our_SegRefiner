@@ -9,9 +9,9 @@ import torch.multiprocessing as mp
 
 def setup_multi_processes(cfg):
     """Setup multi-processing environment variables."""
-    # set multi-process start method as `fork` to speed up the training
+    # set multi-process start method as `spawn` to avoid CUDA crash with forked workers
     if platform.system() != 'Windows':
-        mp_start_method = cfg.get('mp_start_method', 'fork')
+        mp_start_method = cfg.get('mp_start_method', 'spawn')
         current_method = mp.get_start_method(allow_none=True)
         if current_method is not None and current_method != mp_start_method:
             warnings.warn(
