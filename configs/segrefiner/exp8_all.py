@@ -34,13 +34,18 @@ model = dict(
         betas=dict(
             type='linear',
             start=0.8,
-            stop=0,
+            stop=0.0,
             num_timesteps=6),
         noise_components=dict(
             use_obj=True,
             use_bnd=True,
             use_unc=True
         )
+    ),
+    test_cfg=dict(
+        fine_prob_thr=0.5,      # Ngưỡng 50%: Bắt đầu tinh chỉnh ngay khi có độ tự tin trung bình
+        max_local_patches=16,   # Cho phép sửa nhiều patch hơn mỗi ảnh
+        nms_iou_thr=0.5
     )
 )
 
@@ -48,10 +53,14 @@ data = dict(train=dict(pipeline=[
     dict(type='LoadImageFromFile'),
     dict(type='LoadAnnotations', with_bbox=False, with_label=False, with_mask=False, with_seg=True),
     dict(type='LoadOEMCoarseMasks', use_obj=True, use_bnd=True, use_unc=True, test_mode=False),
-    dict(type='LoadObjectData'),
-    dict(type='Resize', img_scale=(256, 256), keep_ratio=False),
+    # Lưu global view (1024→256) TRƯỚC khi crop
+    dict(type='AddGlobalView', size=256),
+    # Crop đồng bộ img + masks + unc_map + edge_map cùng vùng ngẫu nhiên 256×256
+    dict(type='RandomCropAll', crop_size=256),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='Normalize', mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['object_img', 'object_gt_masks', 'object_coarse_masks', 'object_unc_map', 'object_edge_map']),
+    dict(type='Collect', keys=['img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map',
+                               'global_img', 'global_gt_np', 'global_coarse_np',
+                               'global_unc_np', 'global_edge_np']),
 ]))

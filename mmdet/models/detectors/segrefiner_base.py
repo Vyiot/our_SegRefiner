@@ -41,18 +41,15 @@ class SegRefiner(BaseModule):
     def _diffusion_init(self, diffusion_cfg):
         self.diff_iter = diffusion_cfg['diff_iter']
         betas = diffusion_cfg['betas']
-        self.eps = 1.e-6
+        # Quy ước CHUẨN bài báo: t=0 (Sạch nhất: 0.8) -> t=5 (Bẩn nhất: 0.0)
         self.betas_cumprod = np.linspace(
             betas['start'], betas['stop'], 
             betas['num_timesteps'])
         
-        # Đảm bảo betas_cumprod luôn giảm dần (Từ Sạch đến Bẩn)
-        # Sạch (t=0, beta lớn) -> Bẩn (t=T, beta nhỏ)
-        if self.betas_cumprod[0] < self.betas_cumprod[-1]:
-            self.betas_cumprod = self.betas_cumprod[::-1]
-
-        betas_cumprod_prev = self.betas_cumprod[:-1]
-        self.betas_cumprod_prev = np.insert(betas_cumprod_prev, 0, 1)
+        # betas_cumprod_prev[t] là giá trị tại bước trước đó (t+1)
+        # Ví dụ t=4 thì prev là t=5.
+        self.betas_cumprod_prev = np.append(self.betas_cumprod[1:], 0.0)
+        
         self.betas = self.betas_cumprod / self.betas_cumprod_prev
         self.num_timesteps = self.betas_cumprod.shape[0]
         # [NEW] Đọc cấu hình các thành phần nhiễu (Ablation Study)
@@ -268,9 +265,10 @@ class SegRefiner(BaseModule):
         pred_logits = self.denoise_model(model_input, t)
         t = t[0].item()
         x_start_fine_probs = 2 * torch.abs(pred_logits.sigmoid() - 0.5)
-        beta_cumprod = self.betas_cumprod[t]
-        beta_cumprod_prev = self.betas_cumprod_prev[t]
-        p_c_to_f = x_start_fine_probs * (beta_cumprod_prev - beta_cumprod) / (1 - x_start_fine_probs*beta_cumprod)
+        beta = self.betas_cumprod[t]
+        beta_prev = self.betas_cumprod_prev[t]
+        # Eq.14 trong bài báo: beta - beta_prev (vì beta tăng dần theo hướng sạch)
+        p_c_to_f = x_start_fine_probs * (beta - beta_prev) / (1 - x_start_fine_probs * beta_prev)
         cur_fine_probs = cur_fine_probs + (1 - cur_fine_probs) * p_c_to_f
         return pred_logits, cur_fine_probs
     
