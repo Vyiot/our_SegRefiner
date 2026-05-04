@@ -75,17 +75,21 @@ train_pipeline = [
     dict(type='LoadAnnotations', with_bbox=False, with_label=False, with_mask=False, with_seg=True),
     # [NEW] Pipeline đa cấp cho OpenEarthMap
     dict(type='LoadOEMCoarseMasks',
-         use_obj=False,    # [ABLATION] Sẽ override trong từng exp
+         use_obj=False,
          use_bnd=False,
          use_unc=False,
          obj_unc_threshold=0.3,
          test_mode=False),
-    dict(type='LoadObjectData'),
-    dict(type='Resize', img_scale=(object_size, object_size), keep_ratio=False),
+    # Lưu global view (1024→256) TRƯỚC khi crop
+    dict(type='AddGlobalView', size=object_size),
+    # Crop đồng bộ img + masks + unc_map + edge_map cùng 1 vùng ngẫu nhiên 256×256
+    dict(type='RandomCropAll', crop_size=object_size),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['object_img', 'object_gt_masks', 'object_coarse_masks']),
+    dict(type='Collect', keys=['img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map',
+                               'global_img', 'global_gt_np', 'global_coarse_np',
+                               'global_unc_np', 'global_edge_np']),
 ]
 
 val_data_root = '/home/ubuntu/vy/Denoiser/OEM_v2_Building'
@@ -136,7 +140,7 @@ data = dict(
         pipeline=val_pipeline,
         test_mode=True,
     ),
-    train_dataloader=dict(samples_per_gpu=16, workers_per_gpu=4),
+    train_dataloader=dict(samples_per_gpu=8, workers_per_gpu=4),
     val_dataloader=dict(samples_per_gpu=1, workers_per_gpu=4),
 )
 

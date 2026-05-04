@@ -1154,7 +1154,8 @@ class LoadOEMCoarseMasks:
                 precomputed_unc=precomputed_unc,
                 precomputed_edge=precomputed_edge
             )
-            # Lưu raw maps để q_sample dùng cho t-dependent noise (Eq. 6-11)
+            
+            # Lưu raw maps giữ nguyên kích thước gốc để CropAuxMaps crop đồng bộ
             results['unc_map'] = uncertainty_map.astype(np.float32)
             results['edge_map'] = edge_map.astype(np.float32)
 
@@ -1194,66 +1195,181 @@ class LoadOEMCoarseMasks:
         coarse = gt_mask.copy().astype(np.float32)
 
         # ------------------------------------------------------------------ #
-        # Bước 1: Tính bản đồ độ bất định U_score (dùng cho cả Obj và Unc)
+        # NOTE: Object Noise và Uncertainty Noise được xử lý trong q_sample.
+        # Ở đây chỉ cần đưa ra uncertainty_map và edge_map để q_sample dùng.
+        # coarse_masks (x_last) chỉ được dùng trong fallback của q_sample.
         # ------------------------------------------------------------------ #
+
+        # Tính uncertainty_map (cần cho cả Object và Uncertainty noise trong q_sample)
         uncertainty_map = None
         if self.use_obj or self.use_unc:
             if precomputed_unc is not None:
                 uncertainty_map = precomputed_unc
             else:
-                # Fallback: tính GMM on-the-fly nếu chưa precompute
                 uncertainty_map = compute_gmm_uncertainty(img)
 
-        # ------------------------------------------------------------------ #
-        # Bước 2: Object-level noise – xóa tòa nhà có U_score cao
-        # ------------------------------------------------------------------ #
-        if self.use_obj and uncertainty_map is not None:
-            from scipy import ndimage as ndi
-            labels, num_features = ndi.label(gt_mask.astype(np.int32))
-            if num_features > 0:
-                # Vectorized: tính mean uncertainty cho tất cả buildings cùng lúc
-                mean_uncs = np.array(ndi.mean(
-                    uncertainty_map, labels, range(1, num_features + 1)
-                ))
-                high_unc = np.where(mean_uncs > self.obj_unc_threshold)[0] + 1
-                if len(high_unc) > 0:
-                    coarse[np.isin(labels, high_unc)] = 0.0
-
-        # ------------------------------------------------------------------ #
-        # Bước 3: Uncertainty-level noise – thêm nhiễu vùng nhập nhằng
-        # ------------------------------------------------------------------ #
-        if self.use_unc and uncertainty_map is not None:
-            # print(f"  [DEBUG] Dang tinh Uncertainty noise...")
-            # Tạo nhiễu ngẫu nhiên tại các pixel có uncertainty cao
-            noise_sample = np.random.rand(*uncertainty_map.shape).astype(np.float32)
-            # Flip ngẫu nhiên giá trị pixel khi uncertainty > ngưỡng ngẫu nhiên
-            flip_mask = (noise_sample < uncertainty_map * 0.5).astype(np.float32)
-            coarse = np.abs(coarse - flip_mask)
-            coarse = np.clip(coarse, 0.0, 1.0)
-
-        # ------------------------------------------------------------------ #
-        # Bước 4: Boundary-level noise – làm nhòe biên dựa trên Canny RGB
-        # ------------------------------------------------------------------ #
+        # Load edge_map để truyền vào q_sample (KHÔNG áp dụng noise ở đây)
+        edge_np = np.zeros(gt_mask.shape, dtype=np.float32)
         if self.use_bnd:
             if precomputed_edge is not None:
                 edge_np = precomputed_edge
             else:
-                # Fallback: tính Canny on-the-fly nếu chưa precompute
                 gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
                 low  = int(self.canny_low  * 255)
                 high = int(self.canny_high * 255)
                 edge_np = cv2.Canny(gray, low, high).astype(np.float32) / 255.0
 
-            # Giãn biên để tạo vùng mờ rộng hơn
-            kernel = np.ones((self.bnd_dilate_ksize, self.bnd_dilate_ksize),
-                             dtype=np.uint8)
-            edge_dilated = cv2.dilate(edge_np.astype(np.uint8), kernel)
-
-            # Flip giá trị pixel trong vùng biên với xác suất cao
-            bnd_noise = np.random.rand(*edge_dilated.shape).astype(np.float32)
-            flip_bnd = ((bnd_noise < 0.4) & (edge_dilated == 1)).astype(np.float32)
-            coarse = np.abs(coarse - flip_bnd)
-            coarse = np.clip(coarse, 0.0, 1.0)
-
-        coarse_binary = (coarse >= 0.5).astype(np.uint8)
+        coarse_binary = (coarse >= 0.5).astype(np.uint8)  # = gt_mask (chưa áp dụng noise)
         return coarse_binary, uncertainty_map, edge_np
+
+
+
+
+@PIPELINES.register_module()
+class AddGlobalView:
+    """Tạo global view (interpolate 1024→256) trước khi RandomCrop.
+
+    Lưu ảnh toàn cảnh đã normalize + resize vào 'global_img' (tensor CHW),
+    cùng với các mask và auxiliary maps đã resize, để sau này concat
+    vào batch dimension trong get_train_input.
+
+    Cần đặt transform này SAU LoadOEMCoarseMasks và TRƯỚC RandomCrop.
+    """
+
+    def __init__(self,
+                 size=256,
+                 mean=(123.675, 116.28, 103.53),
+                 std=(58.395, 57.12, 57.375),
+                 to_rgb=True):
+        self.size = size
+        self.mean = np.array(mean, dtype=np.float32)
+        self.std = np.array(std, dtype=np.float32)
+        self.to_rgb = to_rgb
+
+    def __call__(self, results):
+        img = results['img']  # HWC, BGR, uint8
+
+        # --- Global Image (normalize thủ công) ---
+        global_img = cv2.resize(img, (self.size, self.size),
+                                interpolation=cv2.INTER_LINEAR)
+        if self.to_rgb:
+            global_img = global_img[:, :, ::-1].copy()  # BGR → RGB
+        global_img = global_img.astype(np.float32)
+        global_img = (global_img - self.mean) / self.std   # Normalize
+        # HWC → CHW tensor
+        results['global_img'] = torch.from_numpy(
+            np.ascontiguousarray(global_img.transpose(2, 0, 1))).float()
+
+        # --- Global GT mask ---
+        if 'gt_masks' in results and results['gt_masks'] is not None:
+            gt_np = results['gt_masks'].masks[0].astype(np.float32)
+            results['global_gt_np'] = cv2.resize(
+                gt_np, (self.size, self.size), interpolation=cv2.INTER_NEAREST)
+
+        # --- Global Coarse mask ---
+        if 'coarse_masks' in results and results['coarse_masks'] is not None:
+            coarse_np = results['coarse_masks'].masks[0].astype(np.float32)
+            results['global_coarse_np'] = cv2.resize(
+                coarse_np, (self.size, self.size), interpolation=cv2.INTER_NEAREST)
+
+        # --- Global Unc map ---
+        if 'unc_map' in results:
+            results['global_unc_np'] = cv2.resize(
+                results['unc_map'], (self.size, self.size),
+                interpolation=cv2.INTER_LINEAR).astype(np.float32)
+
+        # --- Global Edge map ---
+        if 'edge_map' in results:
+            results['global_edge_np'] = cv2.resize(
+                results['edge_map'], (self.size, self.size),
+                interpolation=cv2.INTER_NEAREST).astype(np.float32)
+
+        return results
+
+
+@PIPELINES.register_module()
+class RandomCropAll:
+    """Random Crop đồng bộ toàn bộ: img, masks, unc_map, edge_map.
+
+    Thay thế RandomCrop + CropAuxMaps bằng 1 transform duy nhất.
+    Không cần patch MMDet internals hay truyền crop_bbox qua nhiều bước.
+
+    Uncertainty-Aware Sampling:
+        - 70% xác suất: crop quanh vùng có unc_map cao nhất (jitter ±64px)
+        - 30% xác suất: crop ngẫu nhiên như cũ
+    Giúp model tập trung học vùng khó mà GMM không chắc chắn.
+    """
+
+    def __init__(self, crop_size, unc_jitter=64):
+        if isinstance(crop_size, int):
+            crop_size = (crop_size, crop_size)
+        self.crop_h, self.crop_w = crop_size
+        self.unc_jitter = unc_jitter  # jitter pixels quanh tâm uncertain
+
+    def _get_crop_origin(self, H, W, unc_map):
+        """Tính điểm crop (y1, x1): luôn crop vào vùng unc cao nhất.
+        Fallback về random chỉ khi unc_map=None hoặc max < 0.3.
+        """
+        margin_h = max(H - self.crop_h, 0)
+        margin_w = max(W - self.crop_w, 0)
+
+        # Luôn crop vào vùng uncertain cao nhất
+        if (unc_map is not None
+                and unc_map.max() > 0.3):
+            # Tìm pixel có uncertainty cao nhất → làm tâm crop
+            cy, cx = np.unravel_index(unc_map.argmax(), unc_map.shape)
+            # Jitter ngẫu nhiên quanh tâm để tăng đa dạng
+            jitter_y = np.random.randint(-self.unc_jitter, self.unc_jitter + 1)
+            jitter_x = np.random.randint(-self.unc_jitter, self.unc_jitter + 1)
+            cy = int(cy) + jitter_y
+            cx = int(cx) + jitter_x
+            # Tính y1, x1 sao cho tâm nằm trong crop
+            y1 = cy - self.crop_h // 2
+            x1 = cx - self.crop_w // 2
+            # Clamp vào [0, margin]
+            y1 = int(np.clip(y1, 0, margin_h))
+            x1 = int(np.clip(x1, 0, margin_w))
+        else:
+            # Fallback: random crop như cũ
+            y1 = np.random.randint(0, margin_h + 1)
+            x1 = np.random.randint(0, margin_w + 1)
+
+        return y1, x1
+
+    def __call__(self, results):
+        img = results['img']
+        H, W = img.shape[:2]
+        unc_map = results.get('unc_map', None)  # (H, W) float32 hoặc None
+
+        # Tính vùng crop
+        y1, x1 = self._get_crop_origin(H, W, unc_map)
+        y2 = y1 + min(self.crop_h, H)
+        x2 = x1 + min(self.crop_w, W)
+        actual_h = y2 - y1
+        actual_w = x2 - x1
+
+        # --- Crop img ---
+        results['img'] = img[y1:y2, x1:x2]
+        results['img_shape'] = results['img'].shape
+
+        # --- Crop BitmapMasks (gt_masks, coarse_masks) ---
+        for key in results.get('mask_fields', []):
+            results[key] = results[key].crop(np.array([x1, y1, x2, y2]))
+
+        # --- Crop & resize unc_map ---
+        if 'unc_map' in results:
+            m = results['unc_map'][y1:y2, x1:x2]
+            if actual_h != self.crop_h or actual_w != self.crop_w:
+                m = cv2.resize(m, (self.crop_w, self.crop_h),
+                               interpolation=cv2.INTER_LINEAR)
+            results['unc_map'] = m.astype(np.float32)
+
+        # --- Crop & resize edge_map ---
+        if 'edge_map' in results:
+            m = results['edge_map'][y1:y2, x1:x2]
+            if actual_h != self.crop_h or actual_w != self.crop_w:
+                m = cv2.resize(m, (self.crop_w, self.crop_h),
+                               interpolation=cv2.INTER_NEAREST)
+            results['edge_map'] = m.astype(np.float32)
+
+        return results

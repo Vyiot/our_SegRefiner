@@ -1016,6 +1016,7 @@ class RandomCrop:
 
         return results
 
+
     def _get_crop_size(self, image_size):
         """Randomly generates the absolute crop size based on `crop_type` and
         `image_size`.

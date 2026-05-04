@@ -104,8 +104,8 @@ class SegRefiner(BaseModule):
         losses['iou'] = iou_pred.mean()
         return losses
 
-    def _get_texture_loss(self, pred, target):
-        """Tính L1 loss giữa gradient của dự đoán và GT."""
+    def _get_texture_loss(self, pred, target, weight=None):
+        """Tính L1 loss giữa gradient của dự đoán và GT, với optional per-pixel weight."""
         def gradient(x):
             h_x = x.size()[-2]
             w_x = x.size()[-1]
@@ -115,8 +115,18 @@ class SegRefiner(BaseModule):
             return torch.abs(g_x) + torch.abs(g_y)
 
         grad_pred = gradient(pred)
-        grad_gt = gradient(target)
-        return F.l1_loss(grad_pred, grad_gt)
+        grad_gt   = gradient(target)
+        loss_map  = torch.abs(grad_pred - grad_gt)   # (B, 1, H, W)
+
+        if weight is not None:
+            # Đảm bảo shape khớp
+            w = weight
+            if w.shape != loss_map.shape:
+                w = F.interpolate(w, size=loss_map.shape[-2:],
+                                  mode='bilinear', align_corners=False)
+            loss_map = loss_map * w
+            return loss_map.sum() / (w.sum() + 1e-6)
+        return loss_map.mean()
     
     def get_train_input(self, object_img, object_gt_masks, object_coarse_masks,
                         patch_img=None, patch_gt_masks=None, patch_coarse_masks=None):
