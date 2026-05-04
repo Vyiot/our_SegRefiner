@@ -297,9 +297,10 @@ class SegRefinerSemantic(SegRefiner):
         B_total = img.shape[0]
         t = torch.zeros(B_total, dtype=torch.long, device=current_device)
 
-        # Random t từ 0..5 cho toàn bộ batch (cả crops lẫn globals)
-        # Không cố định t=0 cho crops — giúp model học đều tất cả các bước diffusion
-        t = torch.randint(0, self.num_timesteps, (B_total,), device=current_device)
+        # Biased sampling: Ưu tiên các bước t lớn (3,4,5) vì chúng khó hơn
+        # weights: t=0(1), t=1(1), t=2(1), t=3(2), t=4(3), t=5(4)
+        weights = torch.tensor([1, 1, 1, 2, 3, 4], dtype=torch.float, device=current_device)
+        t = torch.multinomial(weights, B_total, replacement=True)
 
         x_t = self.q_sample(target, x_last, t, current_device)
         z_t = torch.cat((img, x_t), dim=1)
