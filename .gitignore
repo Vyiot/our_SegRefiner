@@ -50,7 +50,7 @@ coverage.xml
 *.pot
 
 # Django stuff:
-*.log
+# *.log  # Bỏ comment để cho phép log trong work_dirs
 local_settings.py
 db.sqlite3
 
@@ -114,8 +114,11 @@ checkpoints
 docs/modelzoo_statistics.md
 mmdet/.mim
 
-# Bỏ qua work_dirs (output training)
-work_dirs/
+# Cho phép work_dirs (logs, configs) nhưng bỏ qua checkpoints bên trong
+!work_dirs/
+work_dirs/**/*.pth
+work_dirs/**/*.pt
+work_dirs/**/*.ckpt
 
 # Bỏ qua file ảnh
 *.png
@@ -128,7 +131,6 @@ check_empty_labels.py
 compare_unc_methods.py
 count_noise.py
 visualize_coarse_process.py
-visualize_coarse_real.py
 visualize_full_steps.py
 visualize_precomputed.py
 
