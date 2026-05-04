@@ -67,18 +67,22 @@ class SegRefinerSemantic(SegRefiner):
         global_indices = list(range(1, self.num_timesteps))[::-1]  # [5,4,3,2,1]
         vis_global_steps = []  # lưu intermediate steps để visualize
 
+        # min_prob = 1 - fine_prob_thr: pixel cần fine_probs >= min_prob để dùng model
+        # fine_prob_thr cao → min_prob thấp → model sửa liều hơn (ít cần tự tin hơn)
+        fine_prob_thr = self.test_cfg.get('fine_prob_thr', 0.9)
+        min_commit_prob = 1.0 - fine_prob_thr
+
         for i in global_indices:
             t = torch.tensor([i], device=current_device)
             model_input = torch.cat((img_256, cur_x), dim=1)
             cur_x, cur_fine_probs = self.p_sample(model_input, cur_fine_probs, t)
 
-            # Eq.11: cập nhật cur_x
-            noise = torch.rand_like(cur_x)
-            fine_map = (noise < cur_fine_probs).float()
+            # Eq.11: Hard threshold thay vì random sampling
+            fine_map = (cur_fine_probs >= min_commit_prob).float()
             pred_x_start = (cur_x >= 0).float()
             cur_x = pred_x_start * fine_map + mask_256 * (1 - fine_map)
 
-            # Lưu lại step này để vis (cur_x đã là binary {0,1} sau Eq.11)
+            # Lưu lại step này để vis
             vis_global_steps.append((i, cur_x.squeeze().cpu()))
 
         # Phóng fine_probs và mask global (logit) lên 1024
@@ -112,7 +116,7 @@ class SegRefinerSemantic(SegRefiner):
                 y2 = min(y1 + patch_size, H)
                 x2 = min(x1 + patch_size, W)
                 patch_fp = fp_map[y1:y2, x1:x2]
-                score = 1.0 - patch_fp.mean().item()  # cao = uncertain nhiều
+                score = 1.0 - patch_fp.mean().item()  # Cao = vùng này model đang phân vân nhất, cần soi kỹ ở Stage 2
                 if score > 0:
                     candidates.append((score, y1, x1, y2, x2))
 
@@ -294,18 +298,9 @@ class SegRefinerSemantic(SegRefiner):
         B_total = img.shape[0]
         t = torch.zeros(B_total, dtype=torch.long, device=current_device)
 
-        if has_global:
-            # Nếu có global view, batch được chia đôi: [Crops | Globals]
-            B_half = B_total // 2
-            # 1. Nửa đầu (Crops): t = 0
-            t[:B_half] = 0
-            # 2. Nửa sau (Globals): t ngẫu nhiên từ 1 đến 5
-            t_global = torch.randint(1, self.num_timesteps, (B_total - B_half,), 
-                                     device=current_device)
-            t[B_half:] = t_global
-        else:
-            # Nếu không có global (trường hợp hiếm), lấy t ngẫu nhiên từ 0-5 như cũ
-            t = torch.randint(0, self.num_timesteps, (B_total,), device=current_device)
+        # Random t từ 0..5 cho toàn bộ batch (cả crops lẫn globals)
+        # Không cố định t=0 cho crops — giúp model học đều tất cả các bước diffusion
+        t = torch.randint(0, self.num_timesteps, (B_total,), device=current_device)
 
         x_t = self.q_sample(target, x_last, t, current_device)
         z_t = torch.cat((img, x_t), dim=1)

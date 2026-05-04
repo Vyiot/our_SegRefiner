@@ -43,7 +43,7 @@ model = dict(
         )
     ),
     test_cfg=dict(
-        fine_prob_thr=0.5,      # Ngưỡng 50%: Bắt đầu tinh chỉnh ngay khi có độ tự tin trung bình
+        fine_prob_thr=0.8,      # Ngưỡng 80%: Chỉ cần tin 20% là sửa luôn (liều hơn)
         max_local_patches=16,   # Cho phép sửa nhiều patch hơn mỗi ảnh
         nms_iou_thr=0.5
     )
@@ -65,5 +65,5 @@ data = dict(
                                    'global_img', 'global_gt_np', 'global_coarse_np',
                                    'global_unc_np', 'global_edge_np']),
     ]),
-    train_dataloader=dict(samples_per_gpu=2)
+    train_dataloader=dict(samples_per_gpu=8)
 )

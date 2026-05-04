@@ -140,7 +140,7 @@ data = dict(
         pipeline=val_pipeline,
         test_mode=True,
     ),
-    train_dataloader=dict(samples_per_gpu=2, workers_per_gpu=4),
+    train_dataloader=dict(samples_per_gpu=8, workers_per_gpu=4),
     val_dataloader=dict(samples_per_gpu=1, workers_per_gpu=4),
 )
 
