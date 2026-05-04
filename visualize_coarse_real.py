@@ -11,8 +11,8 @@ from sklearn.mixture import GaussianMixture
 
 # ─── CẤU HÌNH (KHỚP VỚI segrefiner_semantic.py) ──────────────────────────────
 DATA_ROOT = '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'
-CITY = 'malopolskie'
-NAME = 'malopolskie_10'
+CITY = 'melbourne'
+NAME = 'melbourne_10'
 T_MAX = 6  # num_timesteps
 
 # Thông số Canny Level 4 (khớp precompute_maps.py)
@@ -67,56 +67,46 @@ def q_sample_vis(t):
     """Mô phỏng chính xác q_sample trong segrefiner_semantic.py"""
     beta_b = betas_cumprod[t]
 
-    # ── Object-level noise (Eq. 7: U_k^obj = mean unc của building) ────
+    # ── Equation 7: Object-level noise (Xóa vật thể) ──────────────────
     labeled = measure.label(gt > 0.5)
     instances = [(labeled == i) for i in range(1, labeled.max() + 1)]
-
     M_obj = np.zeros_like(gt)
     if len(instances) > 0:
-        threshold = 1.0 / (1.0 + np.exp(-beta_b))  # sigmoid(beta_b)
-        unc_scores = [unc[inst].mean() for inst in instances]
-        kept_any = False
-        for inst, u_k in zip(instances, unc_scores):
-            if u_k <= threshold:   # U_k^obj <= sigmoid(beta_t) → giữ building
-                M_obj[inst] = 1.0
-                kept_any = True
-        # Luôn giữ ít nhất 1 building chắc chắn nhất
-        if not kept_any:
-            best_idx = int(np.argmin(unc_scores))
+        threshold = beta_b  # Bài báo dùng trực tiếp beta_t
+        for inst_mask in instances:
+            u_k = unc[inst_mask].mean()
+            if u_k <= threshold:   # Giữ lại nếu độ tin cậy cao hơn ngưỡng
+                M_obj[inst_mask] = 1.0
+        # Đảm bảo không bị trống hoàn toàn
+        if M_obj.sum() == 0:
+            best_idx = np.argmin([unc[inst].mean() for inst in instances])
             M_obj[instances[best_idx]] = 1.0
 
-    # ── Boundary-level noise (Chỉ áp dụng cho nhà CÒN TỒN TẠI) ──────
-    M_bnd = np.zeros_like(gt)
-    kernel = BND_KERNEL(t)
-    # Lấy vùng biên gốc
-    M_bnd_raw = cv2.dilate(edge, np.ones((kernel, kernel), np.uint8))
-    # Lấy vùng bao phủ của nhà hiện tại (M_obj)
-    M_obj_area = cv2.dilate(M_obj, np.ones((kernel, kernel), np.uint8))
-    # Chỉ giữ lại biên của nhà còn sống
-    M_bnd = ((M_bnd_raw > 0.5) & (M_obj_area > 0.5)).astype(np.float32)
+    # ── Equation 8: Boundary-level noise (ÉP NHIỄU Ở T=0) ─────────────
+    # Thay vì n = t, dùng n = t + 1 để t=0 vẫn bị dãn biên 1 vòng
+    kernel_b = np.ones((3, 3), np.uint8)
+    M_bnd = cv2.dilate(edge, kernel_b, iterations=t + 1)
 
-    dice = np.random.rand(*gt.shape)
-    M_pixel_applied = M_obj.copy()
-    M_pixel_applied[M_bnd > 0.5] = 1.0 - gt[M_bnd > 0.5]  # paper: 1 - M_fine
-
-    # ── Uncertainty-level noise (UNC flip) ──────────────────────────
-    M_unc_region = np.zeros_like(gt)
+    # ── Equation 6: Uncertainty-level noise (Y chang bài báo) ─────────
     tau_unc = 0.5
-    unc_binary = (unc > tau_unc).astype(np.float32)
-    
-    n_erode = T_MAX - t
-    if n_erode > 0 and unc_binary.any():
-        # Erosion bằng max_pool2d ngược trong training:
-        kernel_e = 2 * n_erode + 1
-        # Dùng opencv erode
-        M_unc_region = cv2.erode(unc_binary, np.ones((kernel_e, kernel_e), np.uint8))
+    unc_binary = (unc > tau_unc).astype(np.uint8)
+    n_iter_unc = T_MAX - t
+    if n_iter_unc > 0:
+        kernel_u = np.ones((3, 3), np.uint8)
+        M_unc = cv2.erode(unc_binary, kernel_u, iterations=n_iter_unc)
     else:
-        M_unc_region = unc_binary
-    M_pixel_applied[M_unc_region > 0.5] = 1.0 - gt[M_unc_region > 0.5]
+        M_unc = unc_binary
+    
+    # ── Equation 9: Combined Super-pixel noise (Boundary U Uncertainty)
+    M_sp = ((M_bnd > 0.5) | (M_unc > 0.5)).astype(np.float32)
 
-    # ── Final composite noise (Mixing Eq.11) ───────────────────────
-    # tau ~ Bernoulli(beta)
-    # tau=1 -> Chọn M_obj (Sạch hơn), tau=0 -> Chọn M_pixel (Bẩn hơn)
+    # Logic đảo ngược pixel (Hole punching 1-gt)
+    M_pixel_applied = M_obj.copy()
+    # Chỉ áp dụng nhiễu tại vùng M_sp
+    M_pixel_applied[M_sp > 0.5] = 1.0 - gt[M_sp > 0.5]
+
+    # ── Final Mixing (Bernoulli with beta_t) ─────────────────────────
+    # t=0 -> beta=0.8 (Sạch), t=5 -> beta=0.0 (Bẩn)
     tau = (np.random.rand(*gt.shape) < beta_b).astype(np.float32)
     m_t = tau * M_obj + (1 - tau) * M_pixel_applied
     

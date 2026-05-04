@@ -262,8 +262,7 @@ class SegRefinerSemantic(SegRefiner):
 
         if unc_map is not None:
             # ── Paper Eq. 7: giữ C_k nếu U_k^obj <= beta_t ──────────
-            # sigmoid(beta_b): t=0→0.69, t=5→0.50 — luôn giữ building chắc
-            threshold = 1.0 / (1.0 + np.exp(-beta_b))  # sigmoid(beta_b)
+            threshold = beta_b  # Bài báo dùng trực tiếp beta_t
             unc_np = unc_map[0, 0].cpu().numpy()
             kept_any = False
             unc_scores = [unc_np[inst].mean() for inst in instances]
@@ -476,6 +475,7 @@ class SegRefinerSemantic(SegRefiner):
             if self.use_unc:
                 tau_unc    = 0.5
                 unc_binary = (unc_b > tau_unc).float()
+                # Dùng đúng công thức bài báo: n = T - t
                 n_erode    = T - t_val
                 if n_erode > 0 and unc_binary.any():
                     kernel_e  = 2 * n_erode + 1
