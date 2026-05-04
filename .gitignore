@@ -131,6 +131,7 @@ check_empty_labels.py
 compare_unc_methods.py
 count_noise.py
 visualize_coarse_process.py
+visualize_coarse_real.py
 visualize_full_steps.py
 visualize_precomputed.py
 
