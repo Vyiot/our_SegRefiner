@@ -69,16 +69,13 @@ class SegRefinerSemantic(SegRefiner):
 
         # min_prob = 1 - fine_prob_thr: pixel cần fine_probs >= min_prob để dùng model
         # fine_prob_thr cao → min_prob thấp → model sửa liều hơn (ít cần tự tin hơn)
-        fine_prob_thr = self.test_cfg.get('fine_prob_thr', 0.9)
-        min_commit_prob = 1.0 - fine_prob_thr
-
         for i in global_indices:
             t = torch.tensor([i], device=current_device)
             model_input = torch.cat((img_256, cur_x), dim=1)
             cur_x, cur_fine_probs = self.p_sample(model_input, cur_fine_probs, t)
 
-            # Eq.11: Hard threshold thay vì random sampling
-            fine_map = (cur_fine_probs >= min_commit_prob).float()
+            # Eq.11: Random sampling theo chuẩn bài báo (giúp Stage 1 bớt "liều")
+            fine_map = (torch.rand_like(cur_fine_probs) < cur_fine_probs).float()
             pred_x_start = (cur_x >= 0).float()
             cur_x = pred_x_start * fine_map + mask_256 * (1 - fine_map)
 
@@ -297,10 +294,8 @@ class SegRefinerSemantic(SegRefiner):
         B_total = img.shape[0]
         t = torch.zeros(B_total, dtype=torch.long, device=current_device)
 
-        # Biased sampling: Ưu tiên các bước t lớn (3,4,5) vì chúng khó hơn
-        # weights: t=0(1), t=1(1), t=2(1), t=3(2), t=4(3), t=5(4)
-        weights = torch.tensor([1, 1, 1, 2, 3, 4], dtype=torch.float, device=current_device)
-        t = torch.multinomial(weights, B_total, replacement=True)
+        # Uniform sampling (chuẩn paper)
+        t = torch.randint(0, self.num_timesteps, (B_total,), device=current_device)
 
         x_t = self.q_sample(target, x_last, t, current_device)
         z_t = torch.cat((img, x_t), dim=1)
@@ -311,33 +306,25 @@ class SegRefinerSemantic(SegRefiner):
         losses = dict()
 
         # ── Uncertainty-Weighted Loss ──────────────────────────────────────────
-        # Vùng có GMM uncertainty cao → weight ×3 (1 + 2×unc)
-        # Chỉ áp dụng cho crops (nửa đầu batch), globals dùng weight đều
-        unc_weight = None
-        if has_global and self._cur_unc_map is not None:
-            B_half = B_total // 2
-            # Crops: weight theo unc_map
-            crop_unc = self._cur_unc_map[:B_half]               # (B/2, 1, H, W)
-            crop_w   = 1.0 + 2.0 * crop_unc.clamp(0.0, 1.0)   # range [1, 3]
-            # Globals: weight = 1 (uniform)
-            glob_w = torch.ones(B_total - B_half, 1,
-                                crop_unc.shape[2], crop_unc.shape[3],
-                                device=current_device)
-            unc_weight = torch.cat([crop_w, glob_w], dim=0)     # (B, 1, H, W)
-        elif self._cur_unc_map is not None:
-            unc_weight = 1.0 + 2.0 * self._cur_unc_map.clamp(0.0, 1.0)
+        # Tính trọng số dựa trên Uncertainty Map (GMM)
+        # un_weight giúp model tập trung vào các vùng biên và vùng nhãn sai
+        unc_weight = 1.0
+        if self._cur_unc_map is not None:
+            # Đảm bảo shape khớp (B, 1, H, W)
+            u_map = self._cur_unc_map
+            if u_map.dim() == 3: u_map = u_map.unsqueeze(1)
+            unc_weight = 1.0 + 2.0 * u_map.clamp(0.0, 1.0)
 
-        # Tỷ lệ 2:1 (Lấp đầy : Biên)
+        # Tỷ lệ 2:1 (Lấp đầy : Biên) theo paper
         losses['loss_mask'] = self.loss_mask(
-            pred_logits, target,
-            weight=unc_weight) * 2.0
+            pred_logits, target, weight=unc_weight) * 2.0
+        
         losses['loss_texture'] = self._get_texture_loss(
-            pred_logits.sigmoid(), target,
-            weight=unc_weight) * 0.2
-
+            pred_logits.sigmoid(), target, weight=unc_weight) * 0.2
+        
         losses['iou'] = iou_pred.mean()
 
-        # Log IoU theo từng timestep t (luôn log đủ 6 key để giữ thứ tự trong log)
+        # Log IoU theo từng timestep t
         iou_mean = iou_pred.mean()
         for t_val in range(self.num_timesteps):
             mask = (t == t_val)
@@ -347,13 +334,9 @@ class SegRefinerSemantic(SegRefiner):
 
 
     def get_train_input(self, **kwargs):
-        """Xử lý crop view + global view, concat theo batch dim.
-        
-        Mỗi ảnh đóng góp 2 sample:
-          - Crop view: RandomCrop 256x256 từ ảnh gốc (giữ độ nét)
-          - Global view: Interpolate 1024→256 (toàn cảnh)
+        """Chỉ lấy Crop view (vùng uncertainly) để train local refinement.
+        Bỏ Global view để tập trung tối đa vào độ nét và sửa biên.
         """
-        # === Crop view (từ pipeline chuẩn) ===
         img        = kwargs.get('img', kwargs.get('object_img'))
         gt_masks   = kwargs.get('gt_masks', kwargs.get('object_gt_masks'))
         coarse_masks = kwargs.get('coarse_masks', kwargs.get('object_coarse_masks'))
@@ -368,67 +351,21 @@ class SegRefinerSemantic(SegRefiner):
             """Chuyển numpy/tensor về (B,1,H,W) float32."""
             if m is None: return None
             if not torch.is_tensor(m):
-                m_t = torch.tensor(m, device=current_device, dtype=torch.float32)
+                m_t = torch.tensor(np.array(m), device=current_device, dtype=torch.float32)
             else:
                 m_t = m.to(current_device).float()
             if m_t.dim() == 2: m_t = m_t.unsqueeze(0).unsqueeze(0)
             elif m_t.dim() == 3: m_t = m_t.unsqueeze(1)
+            # Resize nếu cần (thông thường đã khớp 256x256)
             if m_t.shape[-2:] != img.shape[-2:]:
                 mode = 'bilinear' if 'unc' in name else 'nearest'
                 m_t = F.interpolate(m_t, size=img.shape[-2:], mode=mode,
                                     align_corners=False if mode == 'bilinear' else None)
             return m_t
-
-        crop_unc  = to_map_tensor(unc_map, 'unc')
-        crop_edge = to_map_tensor(edge_map, 'edge')
-
-        # === Global view (từ AddGlobalView transform) ===
-        global_img        = kwargs.get('global_img', None)    # (B, 3, 256, 256) tensor
-        global_gt_np      = kwargs.get('global_gt_np', None)  # (B, 256, 256) numpy
-        global_coarse_np  = kwargs.get('global_coarse_np', None)
-        global_unc_np     = kwargs.get('global_unc_np', None)
-        global_edge_np    = kwargs.get('global_edge_np', None)
-
-        has_global = global_img is not None
-
-        if has_global:
-            # Chuyển global numpy masks → tensor (B,1,256,256)
-            def np_to_tensor(arr):
-                if arr is None: return None
-                if not torch.is_tensor(arr):
-                    t = torch.tensor(np.array(arr), device=current_device, dtype=torch.float32)
-                else:
-                    t = arr.to(current_device).float()
-                if t.dim() == 2: t = t.unsqueeze(0).unsqueeze(0)
-                elif t.dim() == 3: t = t.unsqueeze(1)
-                return t
-
-            g_img    = global_img.to(current_device)
-            g_target = np_to_tensor(global_gt_np)
-            g_xlast  = np_to_tensor(global_coarse_np)
-            g_unc    = np_to_tensor(global_unc_np)
-            g_edge   = np_to_tensor(global_edge_np)
-
-            # Concat crop + global theo batch dim
-            img    = torch.cat([img,    g_img   ], dim=0)
-            target = torch.cat([target, g_target], dim=0)
-            x_last = torch.cat([x_last, g_xlast ], dim=0)
-
-            # Stack unc/edge maps (None-safe)
-            if crop_unc is not None and g_unc is not None:
-                self._cur_unc_map  = torch.cat([crop_unc,  g_unc ], dim=0)
-            else:
-                self._cur_unc_map  = crop_unc
-
-            if crop_edge is not None and g_edge is not None:
-                self._cur_edge_map = torch.cat([crop_edge, g_edge], dim=0)
-            else:
-                self._cur_edge_map = crop_edge
-        else:
-            self._cur_unc_map  = crop_unc
-            self._cur_edge_map = crop_edge
- 
-        return target, x_last, img, current_device, has_global
+        self._cur_unc_map  = to_map_tensor(unc_map, 'unc')
+        self._cur_edge_map = to_map_tensor(edge_map, 'edge')
+        
+        return target, x_last, img, current_device, False  # has_global = False
 
 
     def q_sample(self, x_start, x_last, t, current_device):
@@ -458,43 +395,51 @@ class SegRefinerSemantic(SegRefiner):
             # ── Object-level noise (Eq. 7: dùng per-object uncertainty) ─
             M_obj = self.generate_object_noise(gt_b, t_val, unc_map=unc_b) if self.use_obj else gt_b
 
-            # ── Boundary-level noise (Chỉ áp dụng cho nhà CÒN TỒN TẠI) ──────
+            # ── Eq. 8: M_bnd_t (Dilate Canny Edge chuẩn bài báo: n_iter = t) ──────
+            n_bnd = t_val
             M_bnd = torch.zeros_like(gt_b)
             if self.use_bnd:
-                kernel = 2 * t_val + 3
-                if kernel % 2 == 0: kernel += 1
-                padding = kernel // 2
-                # Lấy biên gốc
-                M_bnd_raw = F.max_pool2d(edge_b, kernel_size=kernel, stride=1, padding=padding)
-                # Chỉ giữ lại biên của những nhà CÒN (M_obj)
-                # Dãn M_obj một chút để bao phủ cả vùng biên
-                M_obj_area = F.max_pool2d(M_obj, kernel_size=kernel, stride=1, padding=padding)
-                M_bnd = ((M_bnd_raw > 0.5) & (M_obj_area > 0.5)).float()
+                if n_bnd > 0:
+                    kernel_bnd = torch.ones(3, 3, device=current_device)
+                    # Dilation lặp t_val lần
+                    M_bnd = (edge_b > 0.5).float()
+                    for _ in range(n_bnd):
+                        M_bnd = F.max_pool2d(M_bnd, kernel_size=3, stride=1, padding=1)
+                else:
+                    # t=0: raw edge, no dilation
+                    M_bnd = (edge_b > 0.5).float()
 
-            # ── Uncertainty-level noise ────────────
+            # ── Eq.6: M_unc_t = Erode(1[M_unc > τ], n_iter=T−t) ────────────
+            # t=0 (sạch) → n=6 → erode nhiều → chỉ giữ lõi uncertain cao nhất
+            # t=5 (bẩn) → n=1 → erode ít
+            # t=T-1=5 (n=1) hoặc nếu n=0 thì giữ nguyên binary
             M_unc_region = torch.zeros_like(gt_b)
             if self.use_unc:
                 tau_unc    = 0.5
                 unc_binary = (unc_b > tau_unc).float()
-                # Dùng đúng công thức bài báo: n = T - t
-                n_erode    = T - t_val
-                if n_erode > 0 and unc_binary.any():
-                    kernel_e  = 2 * n_erode + 1
-                    padding_e = n_erode
-                    neg          = 1.0 - unc_binary
-                    dilated_neg  = F.max_pool2d(neg, kernel_size=kernel_e, stride=1, padding=padding_e)
-                    M_unc_region = 1.0 - dilated_neg
+                n_erode    = T - t_val   # Eq.6: n_iter = T − t
+                if n_erode > 0 and unc_binary.sum() > 0:
+                    # Erosion = Dilate(1 − x) rồi lấy 1 − kết quả
+                    # Dùng kernel 3×3 lặp n_erode lần (giống cv2.erode)
+                    kernel_e  = 3
+                    padding_e = 1
+                    neg = 1.0 - unc_binary
+                    for _ in range(n_erode):
+                        neg = F.max_pool2d(neg, kernel_size=kernel_e,
+                                          stride=1, padding=padding_e)
+                    M_unc_region = 1.0 - neg
                 else:
                     M_unc_region = unc_binary
 
-            # ── Final composite noise (Mixing Eq.11) ───────────────────────
-            dice = torch.rand_like(gt_b)
-            M_pixel_applied = M_obj.clone()
-            M_pixel_applied[M_bnd > 0.5] = 1.0 - gt_b[M_bnd > 0.5]  # paper: 1 - M_fine
-            M_pixel_applied[M_unc_region > 0.5] = 1.0 - gt_b[M_unc_region > 0.5]
+            # ── Eq.10: M_pixel-applied_t — base = M_fine (gt), flip vùng M_sp ─
+            # Paper: M_pixel_applied(i,j) = 1-M_fine nếu ∈ M_sp, M_fine otherwise
+            M_pixel_applied = gt_b.clone()                                    # base = M_fine
+            M_pixel_applied[M_bnd      > 0.5] = 1.0 - gt_b[M_bnd      > 0.5]  # flip M_bnd
+            M_pixel_applied[M_unc_region > 0.5] = 1.0 - gt_b[M_unc_region > 0.5]  # flip M_unc
 
+            # ── Eq.11: m_t = τ·M_obj_t + (1−τ)·M_pixel_applied_t ────────────
+            # τ ~ Bernoulli(β̄_t): t=0→β=0.8 (mostly M_obj/sạch), t=5→β=0 (toàn M_pixel_applied/bẩn)
             tau = (torch.rand_like(gt_b) < beta_b).float()
-            # CHUẨN: t=0 (beta=0.8) → tau=0.8 → M_obj (sạch) | t=5 (beta=0.0) → tau=0 → M_pixel_applied (bẩn)
             m_t = tau * M_obj + (1 - tau) * M_pixel_applied
             results.append(m_t)
 

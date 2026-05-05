@@ -65,5 +65,5 @@ data = dict(
                                    'global_img', 'global_gt_np', 'global_coarse_np',
                                    'global_unc_np', 'global_edge_np']),
     ]),
-    train_dataloader=dict(samples_per_gpu=8)
+    train_dataloader=dict(samples_per_gpu=16, workers_per_gpu=4),
 )
