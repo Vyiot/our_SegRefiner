@@ -184,6 +184,7 @@ log_config = dict(
 # khi phát hiện dataset_type = 'OEMBuildingDataset'.
 oem_eval = dict(
     interval=500,
+    num_images=10,
     save_best=True,
 )
 

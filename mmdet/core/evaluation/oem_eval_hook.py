@@ -28,7 +28,11 @@ import cv2
 import mmcv
 import numpy as np
 import torch
+import torchvision.utils as vutils
+import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw
 from mmcv.runner import Hook, HOOKS
+from .refine_utils import gmm_refine_pipeline
 
 
 @HOOKS.register_module()
@@ -52,10 +56,12 @@ class OEMBuildingEvalHook(Hook):
                  dataloader,
                  data_root,
                  interval=5000,
+                 num_images=36,
                  save_best=True):
         self.dataloader = dataloader
         self.data_root = data_root
         self.interval = interval
+        self.num_images = num_images
         self.save_best = save_best
         self.best_miou = 0.0
         self._first_eval = True
@@ -77,92 +83,88 @@ class OEMBuildingEvalHook(Hook):
         model = runner.model
         model.eval()
 
-        # Accumulators cho prediction (refined)
+        # Accumulators cho prediction (refined) và pseudo (coarse)
         pred_ri, pred_ru = 0, 0        # building
         pred_ri_bg, pred_ru_bg = 0, 0  # background
+        ps_ri, ps_ru = 0, 0            # building pseudo
+        ps_ri_bg, ps_ru_bg = 0, 0      # background pseudo
         total_num = 0
+        device = next(model.parameters()).device
 
-        dataset    = self.dataloader.dataset
-        label_dir  = osp.join(dataset.data_root, 'labels')
+        # Helper to denormalize for GMM
+        mean = np.array([123.675, 116.28, 103.53])
+        std  = np.array([58.395, 57.12, 57.375])
 
         for data in self.dataloader:
-            # Lấy img_meta để lấy tên file và crop_bbox
-            try:
-                # Correct mmcv DataContainer access: .data[0] = list cho GPU 0, [0] = ảnh đầu tiên
-                img_meta = data['img_metas'].data[0][0]
-                img_name = img_meta.get('ori_filename', '')
-                crop_bbox = img_meta.get('crop_bbox', None) # [y1, x1, y2, x2]
-            except Exception:
-                img_name = ''
-                crop_bbox = None
+            if total_num >= self.num_images:
+                break
+
+            # Lấy tensors từ DataContainer
+            img_tensor = data['img'].data[0].to(device)        # (1,3,H,W)
+            
+            # Xử lý coarse masks (có thể là BitmapMasks hoặc Tensor)
+            c_m_raw = data['coarse_masks'].data[0][0]
+            if hasattr(c_m_raw, 'masks'):
+                c_mask_np = c_m_raw.masks[0]
+            else:
+                c_mask_np = c_m_raw.numpy()
+
+            # Xử lý gt masks
+            gt_m_raw = data['gt_masks'].data[0][0]
+            if hasattr(gt_m_raw, 'masks'):
+                gt_mask = gt_m_raw.masks[0].astype(np.uint8)
+            elif isinstance(gt_m_raw, torch.Tensor):
+                gt_mask = gt_m_raw.cpu().numpy().astype(np.uint8)
+            else:
+                gt_mask = np.array(gt_m_raw).astype(np.uint8)
+
+            # Denormalize to RGB uint8 for GMM
+            img_np = img_tensor[0].cpu().permute(1, 2, 0).numpy()
+            img_np = (img_np * std + mean).clip(0, 255).astype(np.uint8)
 
             with torch.no_grad():
-                results = model(return_loss=False, rescale=True, 
-                                cur_iter=runner.iter + 1, 
-                                work_dir=runner.work_dir, 
-                                **data)
-
-            for result in results:
-                if result is None:
-                    continue
-
-                # Lấy pred và gt từ pipeline (đều đang ở mức crop/resize)
-                pred_small, _, gt_small = self._unpack_result(result)
-                if pred_small is None or gt_small is None:
-                    continue
-
-                # Load GT gốc (1024x1024)
-                gt_mask = None
-                if img_name:
-                    basename = osp.splitext(img_name)[0]
-                    gt_raw = cv2.imread(osp.join(label_dir, basename + '.tif'), cv2.IMREAD_GRAYSCALE)
-                    if gt_raw is not None:
-                        gt_mask = (gt_raw == 1).astype(np.uint8)
-
-                # Nếu có crop_bbox, ghép pred_small (256x256) vào đúng vị trí trên canvas 1024x1024
-                if gt_mask is not None and crop_bbox is not None:
-                    h_full, w_full = gt_mask.shape
-                    y1, x1, y2, x2 = crop_bbox
-                    
-                    # 1. Resize pred_small về đúng kích thước vùng crop gốc
-                    crop_h, crop_w = y2 - y1, x2 - x1
-                    pred_crop = cv2.resize(pred_small, (crop_w, crop_h), interpolation=cv2.INTER_NEAREST)
-                    
-                    # 2. Tạo canvas trắng và dán vào
-                    pred_full = np.zeros((h_full, w_full), dtype=np.uint8)
-                    pred_full[y1:y2, x1:x2] = pred_crop
-                    
-                    pred_mask = pred_full
-                elif gt_mask is not None:
-                    # [NEW] Nếu KHÔNG có crop_bbox -> Đang chạy toàn ảnh (Full image inference)
-                    # Chỉ cần resize pred_small về đúng kích thước GT gốc (1024x1024)
-                    if pred_small.shape != gt_mask.shape:
-                        pred_mask = cv2.resize(pred_small, (gt_mask.shape[1], gt_mask.shape[0]), interpolation=cv2.INTER_NEAREST)
-                    else:
-                        pred_mask = pred_small
+                # Chạy pipeline refine mới. Lưu vis cho 5 ảnh đầu.
+                do_vis = (total_num < 5)
+                if do_vis:
+                    refined_np, unc_map, vis_steps = gmm_refine_pipeline(
+                        model.module if hasattr(model, 'module') else model,
+                        img_tensor, img_np, c_mask_np, device,
+                        return_vis=True
+                    )
+                    self._save_vis_grid(runner, img_np, c_mask_np, unc_map, vis_steps, refined_np, gt_mask, total_num)
                 else:
-                    # Fallback cuối cùng
-                    pred_mask = pred_small
-                    gt_mask = gt_small
+                    refined_np = gmm_refine_pipeline(
+                        model.module if hasattr(model, 'module') else model,
+                        img_tensor, img_np, c_mask_np, device,
+                        return_vis=False
+                    )
 
-                # ── Val IoU: Tính trên ảnh FULL 1024x1024
-                i, u = self._iou(pred_mask, gt_mask)
-                pred_ri += i
-                pred_ru += u
-                i, u = self._iou(1 - pred_mask, 1 - gt_mask)
-                pred_ri_bg += i
-                pred_ru_bg += u
+            # Val IoU: Tính trên ảnh refined
+            i, u = self._iou(refined_np, gt_mask)
+            pred_ri += i
+            pred_ru += u
+            i, u = self._iou(1 - refined_np, 1 - gt_mask)
+            pred_ri_bg += i
+            pred_ru_bg += u
 
-                total_num += 1
+            # Pseudo IoU: Tính trên coarse mask
+            i, u = self._iou(c_mask_np, gt_mask)
+            ps_ri += i
+            ps_ru += u
+            i, u = self._iou(1 - c_mask_np, 1 - gt_mask)
+            ps_ri_bg += i
+            ps_ru_bg += u
 
-        # ── Pseudo IoU: tính trực tiếp từ disk ở kích thước gốc
-        pseudo_iou_b, pseudo_iou_bg = self._compute_pseudo_iou_from_disk()
-        pseudo_miou = (pseudo_iou_b + pseudo_iou_bg) / 2.0
+            total_num += 1
 
         # ── Tính mIoU
-        pred_iou_b  = pred_ri  / max(pred_ru,  1)
-        pred_iou_bg = pred_ri_bg / max(pred_ru_bg, 1)
-        pred_miou   = (pred_iou_b + pred_iou_bg) / 2.0
+        pred_iou_b   = pred_ri / max(pred_ru, 1)
+        pred_iou_bg  = pred_ri_bg / max(pred_ru_bg, 1)
+        pred_miou    = (pred_iou_b + pred_iou_bg) / 2.0
+
+        pseudo_iou_b  = ps_ri / max(ps_ru, 1)
+        pseudo_iou_bg = ps_ri_bg / max(ps_ru_bg, 1)
+        pseudo_miou   = (pseudo_iou_b + pseudo_iou_bg) / 2.0
 
         # ── Ghi vào log buffer
         runner.log_buffer.output['val/mIoU'] = pred_miou
@@ -213,89 +215,59 @@ class OEMBuildingEvalHook(Hook):
 
         model.train()
 
-    def _compute_pseudo_iou_from_disk(self):
-        """Tính Pseudo IoU từ file gốc trên disk (full resolution), không resize.
+    def _save_vis_grid(self, runner, img_np, c_mask_np, unc_map, vis_steps, result_np, gt_mask, idx):
+        """Lưu grid visualization tương tự infer.py"""
+        vis_dir = osp.join(runner.work_dir, 'vis_val', f'iter_{runner.iter + 1}')
+        os.makedirs(vis_dir, exist_ok=True)
 
-        Đảm bảo kết quả khớp với baseline 80.91% từ model cũ.
-        Returns:
-            (iou_building, iou_background): float trong [0, 1]
-        """
-        dataset = self.dataloader.dataset
-        pseudo_dir = osp.join(dataset.data_root, 'pseudolabels')
-        label_dir  = osp.join(dataset.data_root, 'labels')
+        P = img_np.shape[0] # Usually 1024
 
-        ri, ru     = 0, 0   # building
-        ri_bg, ru_bg = 0, 0  # background
+        def to_t(arr):
+            t = torch.from_numpy(arr).float()
+            if t.ndim == 2: t = t.unsqueeze(0)
+            if t.max() > 1: t = t / 255.0
+            if t.shape[0] == 1:
+                t = t.repeat(3, 1, 1)
+            return t
 
-        for img_name in dataset.img_names:
-            basename = osp.splitext(img_name)[0]
+        def img_to_t(img):
+            return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
 
-            pseudo = cv2.imread(osp.join(pseudo_dir, img_name),
-                                cv2.IMREAD_GRAYSCALE)
-            gt     = cv2.imread(osp.join(label_dir, basename + '.tif'),
-                                cv2.IMREAD_GRAYSCALE)
-            if pseudo is None or gt is None:
-                continue
+        def unc_to_t(unc):
+            # Heatmap cho uncertainty
+            cm = plt.get_cmap('jet')
+            colored = cm(unc)[..., :3]
+            return torch.from_numpy(colored).permute(2, 0, 1).float()
 
-            # Đồng nhất kích thước nếu lệch
-            if pseudo.shape != gt.shape:
-                pseudo = cv2.resize(pseudo, (gt.shape[1], gt.shape[0]),
-                                    interpolation=cv2.INTER_NEAREST)
+        def diff_to_t(coarse, refined):
+            # White=Unchanged, Green=Added, Red=Removed
+            diff = np.zeros((*coarse.shape, 3), dtype=np.float32)
+            diff[(refined == 1) & (coarse == 1)] = [1, 1, 1] # White
+            diff[(refined == 1) & (coarse == 0)] = [0, 1, 0] # Green
+            diff[(refined == 0) & (coarse == 1)] = [1, 0, 0] # Red
+            return torch.from_numpy(diff).permute(2, 0, 1)
 
-            c = (pseudo > 0)          # building predicted
-            g = (gt == 1)             # building GT (class 1)
-
-            ri    += np.count_nonzero(c & g)
-            ru    += np.count_nonzero(c | g)
-            ri_bg += np.count_nonzero(~c & ~g)
-            ru_bg += np.count_nonzero(~c | ~g)
-
-        iou_b  = ri    / max(ru,    1)
-        iou_bg = ri_bg / max(ru_bg, 1)
-        return iou_b, iou_bg
-
-    # ──────────────────────────────────────────────
-    # Helper methods
-    # ──────────────────────────────────────────────
-
-    @staticmethod
-    def _unpack_result(result):
-        """Unpack một kết quả inference thành (pred, coarse, gt).
-
-        SegRefiner (test mode) trả về kết quả theo nhiều format khác nhau
-        tuỳ vào task. Hàm này chuẩn hoá về binary numpy arrays (H,W).
-        """
-        try:
-            if isinstance(result, (tuple, list)) and len(result) == 3:
-                pred, coarse, gt = result
-            elif isinstance(result, (tuple, list)) and len(result) == 2:
-                # (pred_mask, meta_dict)
-                pred = result[0]
-                coarse = result[1].get('coarse_mask', None)
-                gt = result[1].get('gt_mask', None)
-                if coarse is None or gt is None:
-                    return None, None, None
-            else:
-                return None, None, None
-
-            pred = _to_binary(pred)
-            coarse = _to_binary(coarse)
-            gt = _to_binary(gt)
-
-            # Đảm bảo cùng kích thước
-            if pred.shape != gt.shape:
-                pred = cv2.resize(
-                    pred, (gt.shape[1], gt.shape[0]),
-                    interpolation=cv2.INTER_NEAREST)
-            if coarse.shape != gt.shape:
-                coarse = cv2.resize(
-                    coarse, (gt.shape[1], gt.shape[0]),
-                    interpolation=cv2.INTER_NEAREST)
-
-            return pred, coarse, gt
-
-        except Exception:
-            return None, None, None
+        panels = [img_to_t(img_np), to_t(c_mask_np), unc_to_t(unc_map)]
+        labels = ['RGB', 'Pseudo', 'Unc']
+        
+        for lbl, step_arr in vis_steps:
+            panels.append(to_t(step_arr))
+            labels.append(lbl)
+        
+        panels += [to_t(result_np), diff_to_t(c_mask_np, result_np), to_t(gt_mask)]
+        labels += ['Refined', 'Diff', 'GT']
+        
+        grid  = vutils.make_grid(panels, nrow=len(panels), padding=8, pad_value=0.5)
+        ndarr = grid.mul(255).clamp(0, 255).permute(1, 2, 0).to(torch.uint8).numpy()
+        im    = Image.fromarray(ndarr)
+        
+        # Draw labels
+        draw = ImageDraw.Draw(im)
+        for i, lbl in enumerate(labels):
+            # i * (P + padding) + offset
+            draw.text((i * (P + 8) + 12, 12), lbl, fill=(255, 0, 0))
+            
+        im.save(osp.join(vis_dir, f'val_img_{idx}.png'))
 
     @staticmethod
     def _iou(pred, gt):
@@ -306,14 +278,3 @@ class OEMBuildingEvalHook(Hook):
         union = np.count_nonzero(pred | gt)
         return intersection, union
 
-
-def _to_binary(mask):
-    """Chuyển mask về numpy array binary uint8 (H,W), threshold tại 0.5."""
-    if isinstance(mask, torch.Tensor):
-        mask = mask.cpu().numpy()
-    mask = np.squeeze(mask)
-    if mask.dtype != np.uint8:
-        mask = (mask >= 0.5).astype(np.uint8)
-    else:
-        mask = (mask > 0).astype(np.uint8)
-    return mask

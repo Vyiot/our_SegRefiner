@@ -263,6 +263,7 @@ def train_detector(model,
                 dataloader=_val_dataloader,
                 data_root=_data_root,
                 interval=_eval_interval,
+                num_images=_oem_cfg.get('num_images', 36),
                 save_best=_oem_cfg.get('save_best', True),
             ),
             priority='LOW')

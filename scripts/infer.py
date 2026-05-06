@@ -4,13 +4,16 @@ os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 warnings.filterwarnings('ignore')
 
 """
-infer.py  —  So sánh 3 mode inference với best_model.pth
-==========================================================
-MODE 0 (stage1_only) : Chỉ Stage 1 global (t=5→1), không Stage 2
-MODE 1 (blend)       : Stage 1 + Stage 2 Weighted Blending (hiện tại)
-MODE 2 (unc_only)    : Stage 1 + Stage 2 Uncertain-Only Replace (fix đề xuất)
+infer.py  —  GMM-guided refinement inference
+==============================================
+Pipeline:
+  1. Chạy GMM (giống precompute_maps.py) trên ảnh RGB → unc_map ∈ [0,1]
+  2. Tìm vùng có unc_map cao (pixel không tin cậy), sliding-window + NMS
+     để chọn tối đa N patch 256×256
+  3. Mỗi patch chạy full 6 bước diffusion denoising t=5→4→3→2→1→0 để sửa
+  4. Weighted-blend kết quả patch vào mask tổng
 
-Output: Bảng so sánh mIoU của 3 mode vs Pseudo IoU
+Output: Bảng so sánh mIoU: Pseudo vs GMM-Refine
 """
 
 import sys
@@ -22,6 +25,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from sklearn.mixture import GaussianMixture
 
 import mmcv
 from mmcv import Config
@@ -30,17 +34,54 @@ from mmdet.models import build_detector
 from mmdet.datasets import build_dataset
 from mmcv.parallel import collate, scatter
 
+ROOT_DIR         = osp.abspath(osp.join(osp.dirname(__file__), '..'))
+CONFIG_FILE      = osp.join(ROOT_DIR, 'configs/segrefiner/exp8_all.py')
+CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs/exp8_all/best_model1.pth')
+VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs/exp8_all/vis_gmm_refine')
+DEVICE           = 'cuda:0'
+BATCH_SIZE       = 1
+NUM_WORKERS      = 4
+SAVE_VIS         = True
+VIS_MAX          = 9999   # lưu tất cả ảnh
+
+PATCH_SIZE       = 256          # kích thước patch local
+UNC_THRESHOLD    = 0.4          # pixel có unc_map > ngưỡng này → cần sửa
+MAX_LOCAL_PATCHES = 48          # số patch tối đa mỗi ảnh
+NMS_IOU_THR      = 0.3          # NMS IoU threshold để lọc patch chồng lấp
+
+
 # ============================================================
-# Cấu hình
+# GMM Uncertainty (clone từ precompute_maps.py)
 # ============================================================
-CONFIG_FILE = 'configs/segrefiner/exp8_all.py'
-CHECKPOINT  = 'work_dirs/exp8_all/best_model.pth'
-VIS_DIR     = 'work_dirs/exp8_all/vis_compare'
-DEVICE      = 'cuda:0'
-BATCH_SIZE  = 1
-NUM_WORKERS = 4
-SAVE_VIS    = True
-VIS_MAX     = 10
+def compute_gmm_uncertainty(img_rgb: np.ndarray) -> np.ndarray:
+    """
+    Eq. 1: M_unc = H(GMM(x_rgb)) / log(K)  ∈ [0, 1]
+    - W = GMM với K tối ưu chọn bằng BIC (k=2..4)
+    - H = entropy của posterior  = -Σ p·log(p)
+    - chuẩn hoá bằng log(K)  (max entropy của K class)
+    """
+    H, W, C = img_rgb.shape
+    pixels   = img_rgb.astype(np.float32).reshape(-1, C) / 255.0
+
+    # Subsample để tăng tốc
+    n_sub    = min(50_000, pixels.shape[0])
+    idx      = np.random.choice(pixels.shape[0], n_sub, replace=False)
+    sub      = pixels[idx]
+
+    # Chọn K tốt nhất bằng BIC
+    best_k, best_bic, best_gmm = 2, np.inf, None
+    for k in range(2, 5):
+        gmm = GaussianMixture(n_components=k, covariance_type='full',
+                              max_iter=50, random_state=42)
+        gmm.fit(sub)
+        bic = gmm.bic(sub)
+        if bic < best_bic:
+            best_bic, best_k, best_gmm = bic, k, gmm
+
+    proba   = best_gmm.predict_proba(pixels)                   # (N, K)
+    entropy = -np.sum(proba * np.log(proba + 1e-8), axis=1)   # (N,)
+    unc     = (entropy / np.log(best_k)).reshape(H, W).astype(np.float32)
+    return np.clip(unc, 0.0, 1.0)
 
 
 # ============================================================
@@ -76,7 +117,8 @@ def compute_pseudo_iou(dataset):
         if pseudo is None or gt is None:
             continue
         if pseudo.shape != gt.shape:
-            pseudo = cv2.resize(pseudo, (gt.shape[1], gt.shape[0]), interpolation=cv2.INTER_NEAREST)
+            pseudo = cv2.resize(pseudo, (gt.shape[1], gt.shape[0]),
+                                interpolation=cv2.INTER_NEAREST)
         c = (pseudo > 0)
         g = (gt == 1)
         ri    += np.count_nonzero(c & g)
@@ -86,96 +128,19 @@ def compute_pseudo_iou(dataset):
     return ri / max(ru, 1), ri_bg / max(ru_bg, 1)
 
 
-# ============================================================
-# Core inference — trả về 3 kết quả cùng lúc từ 1 forward pass
-# ============================================================
-@torch.no_grad()
-def infer_all_modes(model_obj, img, c_mask_np, device):
-    """
-    Chạy đầy đủ pipeline và trả về:
-      stage1_res  : Stage 1 only (numpy uint8 H×W)
-      blend_res   : Stage 1 + Stage 2 Weighted Blending (numpy uint8 H×W)
-      unc_res     : Stage 1 + Stage 2 Uncertain-Only   (numpy uint8 H×W)
-    """
-    if c_mask_np.sum() <= 128:
-        dummy = _to_binary(c_mask_np)
-        return dummy, dummy, dummy
-
-    H, W = img.shape[-2:]
-    patch_size = 256
-
-    # === Chuẩn bị tensor ===
-    c_tensor = torch.from_numpy(c_mask_np.astype(np.float32)).to(device)
-    c_4d     = c_tensor.unsqueeze(0).unsqueeze(0)   # (1,1,H,W)
-
-    img_256  = F.interpolate(img, size=(patch_size, patch_size), mode='bilinear', align_corners=False)
-    mask_256 = F.interpolate(c_4d, size=(patch_size, patch_size), mode='nearest')
-
-    # === STAGE 1: Global t=5→1 (theo simple_test_semantic gốc) ===
-    fine_prob_thr = model_obj.test_cfg.get('fine_prob_thr', 0.8)
-    min_commit_prob = 1.0 - fine_prob_thr
-
-    cur_x          = mask_256.clone()
-    cur_fine_probs = torch.zeros_like(mask_256)
-    global_indices = list(range(1, model_obj.num_timesteps))[::-1]   # [5,4,3,2,1]
-
-    for i in global_indices:
-        t = torch.tensor([i], device=device)
-        model_input = torch.cat((img_256, cur_x), dim=1)
-        cur_x, cur_fine_probs = model_obj.p_sample(model_input, cur_fine_probs, t)
-
-        fine_map    = (cur_fine_probs >= min_commit_prob).float()
-        pred_x_start = (cur_x >= 0).float()
-        cur_x = pred_x_start * fine_map + mask_256 * (1 - fine_map)
-
-    # Upscale Stage 1 lên 1024
-    global_mask_1024  = F.interpolate(cur_x,          size=(H, W), mode='bilinear', align_corners=False)
-    fine_probs_1024   = F.interpolate(cur_fine_probs, size=(H, W), mode='bilinear', align_corners=False)
-
-    base_mask = (global_mask_1024 >= 0.5).float()   # binarized Stage 1
-
-    # ── Mode 0: Stage 1 only ─────────────────────────────────
-    stage1_res = base_mask[0, 0].cpu().numpy().astype(np.uint8)
-
-    # === STAGE 2: Local t=0 ===
-    nms_iou_thr       = model_obj.test_cfg.get('nms_iou_thr', 0.5)
-    max_local_patches = model_obj.test_cfg.get('max_local_patches', 16)
-    unc_thr           = 1.0 - fine_prob_thr   # pixel uncertain nếu fine_probs < unc_thr
-
-    fp_map = fine_probs_1024[0, 0]   # (H, W)
-
-    # --- Sliding window candidates ---
-    stride = patch_size // 2
-    ys = list(range(0, max(1, H - patch_size + 1), stride))
-    xs = list(range(0, max(1, W - patch_size + 1), stride))
-    if ys and ys[-1] < H - patch_size: ys.append(H - patch_size)
-    if xs and xs[-1] < W - patch_size: xs.append(W - patch_size)
-    if H <= patch_size: ys = [0]
-    if W <= patch_size: xs = [0]
-
-    candidates = []
-    for y1 in ys:
-        for x1 in xs:
-            y2 = min(y1 + patch_size, H)
-            x2 = min(x1 + patch_size, W)
-            patch_fp = fp_map[y1:y2, x1:x2]
-            # Tỷ lệ pixel uncertain trong patch
-            unc_frac = (patch_fp < unc_thr).float().mean().item()
-            if unc_frac <= 0:
-                continue
-            candidates.append((unc_frac, y1, x1, y2, x2))
-
-    # --- NMS ---
-    candidates.sort(key=lambda c: -c[0])
+def nms_patches(candidates, max_patches, nms_iou_thr):
+    """Greedy NMS trên list (score, y1, x1, y2, x2)."""
+    candidates = sorted(candidates, key=lambda c: -c[0])
     kept, suppressed = [], set()
     for i, (score, y1, x1, y2, x2) in enumerate(candidates):
-        if len(kept) >= max_local_patches:
+        if len(kept) >= max_patches:
             break
         if i in suppressed:
             continue
         kept.append((y1, x1, y2, x2))
         for j in range(i + 1, len(candidates)):
-            if j in suppressed: continue
+            if j in suppressed:
+                continue
             _, y1b, x1b, y2b, x2b = candidates[j]
             iy1, ix1 = max(y1, y1b), max(x1, x1b)
             iy2, ix2 = min(y2, y2b), min(x2, x2b)
@@ -183,56 +148,173 @@ def infer_all_modes(model_obj, img, c_mask_np, device):
             union = (y2-y1)*(x2-x1) + (y2b-y1b)*(x2b-x1b) - inter
             if inter / (union + 1e-6) > nms_iou_thr:
                 suppressed.add(j)
+    return kept
 
-    # Accumulators cho 2 mode
-    # Mode 1: Weighted Blend
-    w_1d         = torch.sin(torch.linspace(0, np.pi, patch_size, device=device))
-    patch_weight = (w_1d.view(-1, 1) * w_1d.view(1, -1)).view(1, 1, patch_size, patch_size)
-    accum_mask   = base_mask.clone()
-    accum_weight = torch.ones_like(base_mask)
 
-    # Mode 2: Uncertain-Only Replace
-    result_unc = base_mask.clone()
+# ============================================================
+# Core inference
+# ============================================================
+@torch.no_grad()
+def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
+    """
+    Pipeline:
+      1. GMM trên img_rgb_np → unc_map (H×W float32 ∈ [0,1])
+      2. Sliding-window + NMS trên unc_map → chọn patch cần sửa
+      3. Mỗi patch: full 6-step denoising t=5→4→3→2→1→0
+      4. Weighted-blend patch vào base_mask (= coarse mask)
 
-    t0 = torch.tensor([0], device=device)
+    Args:
+        model_obj   : SegRefiner model (unwrapped)
+        img_tensor  : (1,3,H,W) normalized tensor trên device
+        img_rgb_np  : (H,W,3) uint8 numpy  (denormalized, RGB)
+        c_mask_np   : (H,W) uint8 binary coarse mask
+        device      : torch device string
 
-    for (y1, x1, y2, x2) in kept:
+    Returns:
+        result_np   : (H,W) uint8 binary refined mask
+        unc_map     : (H,W) float32 uncertainty map (để visualize)
+        vis_steps   : list of (label, (H,W) float32) — intermediate steps từ patch 0
+    """
+    H, W = img_tensor.shape[-2:]
+    P    = PATCH_SIZE
+
+    # ── Bước 1: GMM uncertainty từ RGB ──────────────────────────────────────
+    unc_map = compute_gmm_uncertainty(img_rgb_np)   # (H,W) float32
+    print(f'  [Step1-GMM] unc_map: min={unc_map.min():.3f} max={unc_map.max():.3f} '
+          f'mean={unc_map.mean():.3f}  px>thr={((unc_map>UNC_THRESHOLD).mean()*100):.1f}%')
+
+    # Chuyển unc_map sang tensor (1,1,H,W) — dùng làm fine_probs ban đầu cho Stage 2
+    # Giống training: pixel uncertain cao → model được trust hơn để sửa
+    unc_tensor = torch.from_numpy(unc_map).to(device).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+
+    # ── Bước 2: Sliding-window candidates dựa vào unc_map ───────────────────
+    stride = P // 2
+    ys = list(range(0, max(1, H - P + 1), stride))
+    xs = list(range(0, max(1, W - P + 1), stride))
+    if ys and ys[-1] < H - P: ys.append(H - P)
+    if xs and xs[-1] < W - P: xs.append(W - P)
+    if H <= P: ys = [0]
+    if W <= P: xs = [0]
+
+    candidates = []
+    for y1 in ys:
+        for x1 in xs:
+            y2 = min(y1 + P, H)
+            x2 = min(x1 + P, W)
+            patch_unc = unc_map[y1:y2, x1:x2]
+            # Score = tỷ lệ pixel bất định trong patch
+            score = float((patch_unc > UNC_THRESHOLD).mean())
+            if score > 0:
+                candidates.append((score, y1, x1, y2, x2))
+
+    kept = nms_patches(candidates, MAX_LOCAL_PATCHES, NMS_IOU_THR)
+    print(f'  [Step2-NMS] candidates={len(candidates)}  kept_patches={len(kept)}')
+    if kept:
+        scores = sorted([c[0] for c in candidates], reverse=True)[:len(kept)]
+        print(f'             patch scores (top): {[f"{s:.3f}" for s in scores[:5]]}')
+
+    # ── Chuẩn bị tensor coarse mask (1,1,H,W) ───────────────────────────────
+    c_tensor = torch.from_numpy(c_mask_np.astype(np.float32)).to(device)
+    base_mask = c_tensor.unsqueeze(0).unsqueeze(0)   # (1,1,H,W)
+
+    if not kept:
+        print('  [SKIP] Không có patch cần sửa → trả thẳng coarse mask')
+        return c_mask_np.copy(), unc_map, []
+
+    # ── Bước 3 & 4: Với mỗi patch, chạy 6 bước t=5→0 rồi blend ─────────────
+    # Cosine window để tránh vết cắt
+    w_1d         = torch.sin(torch.linspace(0, np.pi, P, device=device))
+    patch_weight = (w_1d.view(-1, 1) * w_1d.view(1, -1)).view(1, 1, P, P)
+
+    accum_mask   = torch.zeros_like(base_mask, dtype=torch.float32)
+    accum_weight = torch.zeros_like(base_mask, dtype=torch.float32)
+
+    # Toàn bộ timestep: 5,4,3,2,1,0
+    all_indices = list(range(model_obj.num_timesteps - 1, -1, -1))
+
+    # Per-step accumulator: blend TẤT CẢ patches tại mỗi timestep để visualize
+    _step_m = {i: torch.zeros_like(base_mask, dtype=torch.float32) for i in all_indices}
+    _step_w = {i: torch.zeros_like(base_mask, dtype=torch.float32) for i in all_indices}
+
+    for pidx, (y1, x1, y2, x2) in enumerate(kept):
         ph, pw = y2 - y1, x2 - x1
-        img_patch   = img[:, :, y1:y2, x1:x2]
-        mask_patch  = base_mask[:, :, y1:y2, x1:x2]
-        fp_patch    = fine_probs_1024[:, :, y1:y2, x1:x2]
+        coarse_mean_patch = float(base_mask[0, 0, y1:y2, x1:x2].mean().cpu())
+        print(f'  [Patch {pidx}] bbox=({y1},{x1},{y2},{x2})  coarse_mean={coarse_mean_patch:.3f}')
 
-        if ph < patch_size or pw < patch_size:
-            img_patch  = F.pad(img_patch,  (0, patch_size-pw, 0, patch_size-ph))
-            mask_patch = F.pad(mask_patch, (0, patch_size-pw, 0, patch_size-ph))
-            fp_patch   = F.pad(fp_patch,   (0, patch_size-pw, 0, patch_size-ph))
+        img_patch  = img_tensor[:, :, y1:y2, x1:x2]
+        mask_patch = base_mask[:, :, y1:y2, x1:x2]
+        fp_patch   = unc_tensor[:, :, y1:y2, x1:x2]   # fine_probs từ GMM
 
-        model_input   = torch.cat((img_patch, mask_patch), dim=1)
-        refined_logit, _ = model_obj.p_sample(model_input, fp_patch, t0)
+        # Pad nếu patch nhỏ hơn P (vùng biên ảnh)
+        if ph < P or pw < P:
+            img_patch  = F.pad(img_patch,  (0, P - pw, 0, P - ph))
+            mask_patch = F.pad(mask_patch, (0, P - pw, 0, P - ph))
+            fp_patch   = F.pad(fp_patch,   (0, P - pw, 0, P - ph))
 
-        # ── Mode 1: Weighted Blend (cách cũ) ─────────────────
-        refined_prob = refined_logit.sigmoid()
-        p_weight     = patch_weight[:, :, :ph, :pw]
+        # ── Chạy full 6 bước denoising trên patch ────────────────────────
+        cur_x          = mask_patch.clone()
+        cur_fine_probs = fp_patch.clone()   # khởi tạo từ GMM unc_map, không phải zeros
+
+        for i in all_indices:
+            x_mean_before = float(cur_x.mean().cpu())
+            t           = torch.tensor([i], device=device)
+            model_input = torch.cat((img_patch, cur_x), dim=1)
+            cur_x, cur_fine_probs = model_obj.p_sample(model_input, cur_fine_probs, t)
+
+            if i == 0:
+                cur_x = cur_x.sigmoid()
+                print(f'    t={i}: logit_mean={x_mean_before:.4f} → sigmoid_mean={float(cur_x.mean()):.4f}'
+                      f'  fine_probs_mean={float(cur_fine_probs.mean()):.4f}')
+            else:
+                fine_map     = (torch.rand_like(cur_fine_probs) < cur_fine_probs).float()
+                pred_x_start = (cur_x >= 0).float()
+                cur_x        = pred_x_start * fine_map + mask_patch * (1 - fine_map)
+                print(f'    t={i}: logit_mean={x_mean_before:.4f} → x_mean={float(cur_x.mean()):.4f}'
+                      f'  fine_map%={float(fine_map.mean())*100:.1f}%'
+                      f'  pred_x_start%={float(pred_x_start.mean())*100:.1f}%')
+
+            # Tích luũ vào per-step accum (tất cả patches)
+            pw_ = patch_weight[:, :, :ph, :pw]
+            _step_m[i][:, :, y1:y2, x1:x2] += cur_x[:, :, :ph, :pw].detach() * pw_
+            _step_w[i][:, :, y1:y2, x1:x2] += pw_
+
+        # cur_x là probability (sau sigmoid ở bước t=0)
+        refined_prob = cur_x   # (1,1,P,P)
+        refined_bin  = (refined_prob >= 0.5).float()
+        coarse_bin   = (mask_patch[:, :, :ph, :pw] >= 0.5).float()
+        diff_added   = float(((refined_bin[:,:,:ph,:pw] == 1) & (coarse_bin == 0)).float().mean()) * 100
+        diff_removed = float(((refined_bin[:,:,:ph,:pw] == 0) & (coarse_bin == 1)).float().mean()) * 100
+        print(f'    → refined_prob_mean={float(refined_prob.mean()):.4f}  '
+              f'added={diff_added:.1f}%  removed={diff_removed:.1f}%')
+
+        # Weighted blend vào accum
+        p_weight = patch_weight[:, :, :ph, :pw]
         accum_mask[:, :, y1:y2, x1:x2]   += refined_prob[:, :, :ph, :pw] * p_weight
         accum_weight[:, :, y1:y2, x1:x2] += p_weight
 
-        # ── Mode 2: Uncertain-Only Replace (fix) ─────────────
-        refined_binary = (refined_logit >= 0).float()
-        fp_region      = fp_patch[:, :, :ph, :pw]
-        unc_mask       = (fp_region < unc_thr).float()   # 1=uncertain, 0=confident
-        refined_out    = refined_binary[:, :, :ph, :pw]
-        result_unc[:, :, y1:y2, x1:x2] = (
-            refined_out * unc_mask
-            + result_unc[:, :, y1:y2, x1:x2] * (1.0 - unc_mask)
-        )
+    # Vùng không có patch → giữ nguyên coarse mask
+    no_patch = (accum_weight == 0)
+    accum_mask[no_patch]   = base_mask.float()[no_patch]
+    accum_weight[no_patch] = 1.0
 
-    # Finalize Mode 1
-    blend_res = ((accum_mask / accum_weight)[0, 0] >= 0.5).cpu().numpy().astype(np.uint8)
+    result = (accum_mask / accum_weight)
+    result_np = (result[0, 0] >= 0.5).cpu().numpy().astype(np.uint8)
 
-    # Finalize Mode 2
-    unc_res = result_unc[0, 0].cpu().numpy().astype(np.uint8)
+    # Tổng kết diff so với coarse
+    total_added   = float(((result_np == 1) & (c_mask_np == 0)).mean()) * 100
+    total_removed = float(((result_np == 0) & (c_mask_np == 1)).mean()) * 100
+    print(f'  [Blend-Final] total_added={total_added:.2f}%  total_removed={total_removed:.2f}%')
 
-    return stage1_res, blend_res, unc_res
+    # Build vis_steps: full image blend TẤT CẢ patches tại mỗi timestep
+    vis_steps = []
+    for i in all_indices:
+        no_p = (_step_w[i] == 0)
+        _step_m[i][no_p] = base_mask.float()[no_p]
+        _step_w[i][no_p] = 1.0
+        step_full = (_step_m[i] / _step_w[i])[0, 0].cpu().numpy()
+        vis_steps.append((f't={i}', step_full))
+
+    return result_np, unc_map, vis_steps
 
 
 # ============================================================
@@ -242,6 +324,12 @@ def main():
     cfg = Config.fromfile(CONFIG_FILE)
 
     # Build val dataset
+    # Xóa vis cũ để tránh lẫn ảnh cũ
+    if SAVE_VIS and osp.exists(VIS_DIR):
+        import shutil
+        shutil.rmtree(VIS_DIR)
+        print(f'Cleared old vis: {VIS_DIR}')
+
     val_dataset = build_dataset(cfg.data.val)
     print(f'Val set: {len(val_dataset)} images')
 
@@ -254,28 +342,32 @@ def main():
         pin_memory=False,
     )
 
-    # Build model
+    # Build & load model
     model = build_detector(cfg.model, test_cfg=cfg.get('test_cfg'))
     load_checkpoint(model, CHECKPOINT, map_location='cpu')
     model = model.to(DEVICE)
     model.eval()
     model_obj = model.module if hasattr(model, 'module') else model
+
     print(f'Loaded: {CHECKPOINT}')
     print(f'num_timesteps = {model_obj.num_timesteps}')
     print(f'betas_cumprod = {model_obj.betas_cumprod}')
-    print(f'fine_prob_thr = {model_obj.test_cfg.get("fine_prob_thr", 0.8)}\n')
+    print(f'UNC_THRESHOLD = {UNC_THRESHOLD}  (GMM-based)')
+    print(f'MAX_PATCHES   = {MAX_LOCAL_PATCHES}')
+    print(f'ALL_STEPS     = t=5→4→3→2→1→0 (6 bước)\n')
 
-    # Accumulators cho 3 mode
-    metrics = {
-        'stage1': [0, 0, 0, 0],   # [ri, ru, ri_bg, ru_bg]
-        'blend':  [0, 0, 0, 0],
-        'unc':    [0, 0, 0, 0],
-    }
+    # Mean/std để denormalize ảnh cho GMM
+    mean_np = np.array([123.675, 116.28,  103.53 ]).reshape(1, 1, 3)
+    std_np  = np.array([58.395,  57.12,   57.375 ]).reshape(1, 1, 3)
+
+    # Accumulators
+    ri, ru, ri_bg, ru_bg = 0, 0, 0, 0
     total_num = 0
     vis_count = 0
     label_dir = osp.join(val_dataset.data_root, 'labels')
 
     for batch_idx, data in enumerate(val_loader):
+        print(f'\n━━━ Image [{batch_idx+1}/{len(val_loader)}] ━━━')
         gpu_id   = int(DEVICE.split(':')[-1]) if ':' in DEVICE else 0
         data_gpu = scatter(data, [gpu_id])[0]
 
@@ -298,110 +390,122 @@ def main():
             coarse = coarse[0]
         c_mask_np = _to_binary(coarse[0].masks[0])
 
-        # Inference 3 mode
-        stage1_small, blend_small, unc_small = infer_all_modes(model_obj, img, c_mask_np, DEVICE)
+        # Denormalize ảnh để chạy GMM
+        img_np = (img[0].cpu().numpy().transpose(1, 2, 0) * std_np + mean_np)
+        img_np = np.clip(img_np, 0, 255).astype(np.uint8)   # (H,W,3) uint8 RGB
+
+        # ── GMM-guided refinement ────────────────────────────────────────────
+        result_np, unc_map, vis_steps = infer_gmm_refine(
+            model_obj, img, img_np, c_mask_np, DEVICE
+        )
 
         # Load GT
         gt_mask = None
         if img_name:
             basename = osp.splitext(img_name)[0]
-            gt_raw = cv2.imread(osp.join(label_dir, basename + '.tif'), cv2.IMREAD_GRAYSCALE)
+            gt_raw = cv2.imread(osp.join(label_dir, basename + '.tif'),
+                                cv2.IMREAD_GRAYSCALE)
             if gt_raw is not None:
                 gt_mask = (gt_raw == 1).astype(np.uint8)
-
-        def align_pred(pred_small, gt_mask, crop_bbox):
-            """Resize/paste pred về kích thước GT."""
-            if gt_mask is None:
-                return pred_small
-            if crop_bbox is not None:
-                h_full, w_full = gt_mask.shape
-                y1, x1, y2, x2 = crop_bbox
-                crop_h, crop_w = y2 - y1, x2 - x1
-                pred_crop = cv2.resize(pred_small, (crop_w, crop_h), interpolation=cv2.INTER_NEAREST)
-                pred_full = np.zeros((h_full, w_full), dtype=np.uint8)
-                pred_full[y1:y2, x1:x2] = pred_crop
-                return pred_full
-            if pred_small.shape != gt_mask.shape:
-                return cv2.resize(pred_small, (gt_mask.shape[1], gt_mask.shape[0]),
-                                  interpolation=cv2.INTER_NEAREST)
-            return pred_small
-
         if gt_mask is None:
             gt_mask = _to_binary(c_mask_np)
 
-        pred_s1  = align_pred(stage1_small, gt_mask, crop_bbox)
-        pred_bl  = align_pred(blend_small,  gt_mask, crop_bbox)
-        pred_unc = align_pred(unc_small,    gt_mask, crop_bbox)
+        # Align pred về GT shape
+        def align_pred(pred, gt):
+            if crop_bbox is not None:
+                h_full, w_full = gt.shape
+                y1, x1, y2, x2 = crop_bbox
+                pred_crop = cv2.resize(pred, (x2 - x1, y2 - y1),
+                                       interpolation=cv2.INTER_NEAREST)
+                pred_full = np.zeros((h_full, w_full), dtype=np.uint8)
+                pred_full[y1:y2, x1:x2] = pred_crop
+                return pred_full
+            if pred.shape != gt.shape:
+                return cv2.resize(pred, (gt.shape[1], gt.shape[0]),
+                                  interpolation=cv2.INTER_NEAREST)
+            return pred
 
-        # Accumulate
-        m = metrics['stage1']
-        m[0], m[1], m[2], m[3] = _iou_accum(pred_s1,  gt_mask, *m)
-        m = metrics['blend']
-        m[0], m[1], m[2], m[3] = _iou_accum(pred_bl,  gt_mask, *m)
-        m = metrics['unc']
-        m[0], m[1], m[2], m[3] = _iou_accum(pred_unc, gt_mask, *m)
+        pred_aligned = align_pred(result_np, gt_mask)
+
+        # Accumulate IoU
+        ri, ru, ri_bg, ru_bg = _iou_accum(pred_aligned, gt_mask,
+                                           ri, ru, ri_bg, ru_bg)
         total_num += 1
 
-        # Visualization
-        if SAVE_VIS and vis_count < VIS_MAX:
+        # ── Visualization: 1 ảnh duy nhất chứa toàn bộ pipeline ────────────
+        if SAVE_VIS:
             import torchvision.utils as vutils
             from PIL import Image, ImageDraw
 
-            mean_v = np.array([123.675, 116.28, 103.53]).reshape(3, 1, 1)
-            std_v  = np.array([58.395, 57.12, 57.375]).reshape(3, 1, 1)
-            img_np = (img[0].cpu().numpy() * std_v + mean_v).clip(0, 255).astype(np.uint8)
-            img_np = img_np.transpose(1, 2, 0)   # (H,W,3)
+            S = 256  # panel size
 
-            def to_t(arr, size=256):
-                a = _to_binary(arr).astype(np.float32)
+            def to_t(arr_hw):
+                a = arr_hw.astype(np.float32)
+                if a.max() > 1.0: a = (a > 0).astype(np.float32)
                 t = torch.from_numpy(a).unsqueeze(0).unsqueeze(0)
-                return F.interpolate(t, size=(size, size), mode='nearest')[0].repeat(3, 1, 1)
+                return F.interpolate(t, (S, S), mode='nearest')[0].repeat(3, 1, 1)
 
-            def img_to_t(arr_hwc, size=256):
-                t = torch.from_numpy(arr_hwc.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)
-                return F.interpolate(t, size=(size, size), mode='bilinear', align_corners=False)[0]
+            def img_to_t(arr_hwc):
+                t = torch.from_numpy(arr_hwc.astype(np.float32) / 255.0
+                                     ).permute(2, 0, 1).unsqueeze(0)
+                return F.interpolate(t, (S, S), mode='bilinear', align_corners=False)[0]
 
-            panels = [
-                img_to_t(img_np),
-                to_t(c_mask_np),
-                to_t(stage1_small),
-                to_t(blend_small),
-                to_t(unc_small),
-                to_t(gt_mask) if gt_mask is not None else to_t(c_mask_np),
-            ]
-            labels = ['RGB', 'Pseudo', 'Stage1-Only', 'Blend(cur)', 'UncOnly(fix)', 'GT']
+            def unc_to_t(unc_hw):
+                u8 = (np.clip(unc_hw, 0, 1) * 255).astype(np.uint8)
+                colored = cv2.applyColorMap(u8, cv2.COLORMAP_VIRIDIS)
+                colored = cv2.cvtColor(colored, cv2.COLOR_BGR2RGB)
+                t = torch.from_numpy(colored.astype(np.float32) / 255.0
+                                     ).permute(2, 0, 1).unsqueeze(0)
+                return F.interpolate(t, (S, S), mode='bilinear', align_corners=False)[0]
 
-            grid  = vutils.make_grid(panels, nrow=len(panels), padding=4, pad_value=1.0)
+            def diff_to_t(pseudo_hw, refined_hw):
+                p = _to_binary(pseudo_hw).astype(bool)
+                r = _to_binary(refined_hw).astype(bool)
+                diff_rgb = np.zeros((*p.shape, 3), dtype=np.uint8)
+                diff_rgb[ p &  r] = [255, 255, 255]
+                diff_rgb[~p & ~r] = [  0,   0,   0]
+                diff_rgb[ p & ~r] = [255,  50,  50]
+                diff_rgb[~p &  r] = [ 50, 220,  50]
+                t = torch.from_numpy(diff_rgb.astype(np.float32) / 255.0
+                                     ).permute(2, 0, 1).unsqueeze(0)
+                return F.interpolate(t, (S, S), mode='nearest')[0]
+
+            # Panels: RGB | Pseudo | GMM-Unc | t=5(p0) | ... | t=0(p0) | Refined | Diff | GT
+            panels = [img_to_t(img_np), to_t(c_mask_np), unc_to_t(unc_map)]
+            labels = ['RGB', 'Pseudo', 'GMM-Unc']
+
+            for lbl, step_arr in vis_steps:  # [("t=5", arr), ..., ("t=0", arr)]
+                panels.append(to_t(step_arr))
+                labels.append(lbl + '(all)')   # hiển thị tất cả patches được blend tại step này
+
+            # Refined = kết quả thực sự (blend tất cả patches)
+            panels += [to_t(result_np), diff_to_t(c_mask_np, result_np), to_t(gt_mask)]
+            labels += ['Refined(all)', 'Diff(R=del G=add)', 'GT']
+
+            grid  = vutils.make_grid(panels, nrow=len(panels), padding=4, pad_value=0.5)
             ndarr = grid.mul(255).clamp(0, 255).permute(1, 2, 0).to(torch.uint8).numpy()
             im    = Image.fromarray(ndarr)
             draw  = ImageDraw.Draw(im)
             for k, lbl in enumerate(labels):
-                draw.text((k * 260 + 6, 6), lbl, fill=(255, 0, 0))
+                draw.text((k * (S + 4) + 4, 4), lbl, fill=(255, 220, 0))
 
             os.makedirs(VIS_DIR, exist_ok=True)
             name = osp.splitext(img_name)[0] if img_name else f'img{batch_idx:04d}'
             im.save(osp.join(VIS_DIR, f'{name}.png'))
             vis_count += 1
 
+        # Progress
         if (batch_idx + 1) % 50 == 0:
-            def running_miou(m):
-                b  = m[0] / max(m[1], 1)
-                bg = m[2] / max(m[3], 1)
-                return (b + bg) / 2 * 100
+            b_run  = ri / max(ru, 1) * 100
+            bg_run = ri_bg / max(ru_bg, 1) * 100
             print(f'  [{batch_idx+1}/{len(val_loader)}]  '
-                  f'S1={running_miou(metrics["stage1"]):.2f}%  '
-                  f'Blend={running_miou(metrics["blend"]):.2f}%  '
-                  f'UncOnly={running_miou(metrics["unc"]):.2f}%')
+                  f'bld={b_run:.2f}%  bg={bg_run:.2f}%  '
+                  f'mIoU={(b_run+bg_run)/2:.2f}%')
 
-    # ── Final metrics ─────────────────────────────────────────
-    def calc(m):
-        b  = m[0] / max(m[1], 1)
-        bg = m[2] / max(m[3], 1)
-        return b, bg, (b + bg) / 2
-
-    s1_b,  s1_bg,  s1_m  = calc(metrics['stage1'])
-    bl_b,  bl_bg,  bl_m  = calc(metrics['blend'])
-    uc_b,  uc_bg,  uc_m  = calc(metrics['unc'])
+    # ── Final metrics ─────────────────────────────────────────────────────────
+    iou_bld  = ri    / max(ru,    1)
+    iou_bg   = ri_bg / max(ru_bg, 1)
+    miou     = (iou_bld + iou_bg) / 2
 
     pseudo_b, pseudo_bg = compute_pseudo_iou(val_dataset)
     pseudo_m = (pseudo_b + pseudo_bg) / 2
@@ -409,28 +513,25 @@ def main():
     try:
         from terminaltables import AsciiTable
         table_data = [
-            ['Class',      'Stage1-Only',         'Blend (cur)',          'UncOnly (fix)',       'Pseudo'],
-            ['background', f'{s1_bg*100:.2f}',    f'{bl_bg*100:.2f}',    f'{uc_bg*100:.2f}',    f'{pseudo_bg*100:.2f}'],
-            ['building',   f'{s1_b*100:.2f}',     f'{bl_b*100:.2f}',     f'{uc_b*100:.2f}',     f'{pseudo_b*100:.2f}'],
-            ['mIoU',       f'{s1_m*100:.2f}',     f'{bl_m*100:.2f}',     f'{uc_m*100:.2f}',     f'{pseudo_m*100:.2f}'],
+            ['Class',      'GMM-Refine',          'Pseudo (input)'],
+            ['background', f'{iou_bg*100:.2f}',   f'{pseudo_bg*100:.2f}'],
+            ['building',   f'{iou_bld*100:.2f}',  f'{pseudo_b*100:.2f}'],
+            ['mIoU',       f'{miou*100:.2f}',      f'{pseudo_m*100:.2f}'],
         ]
         print('\n' + AsciiTable(table_data).table)
     except ImportError:
-        print(f'\n{"="*55}')
+        print(f'\n{"="*45}')
         print(f'{"Mode":<18} {"bg IoU":>8} {"bld IoU":>9} {"mIoU":>7}')
-        print(f'{"-"*55}')
-        print(f'{"Stage1-Only":<18} {s1_bg*100:>8.2f} {s1_b*100:>9.2f} {s1_m*100:>7.2f}')
-        print(f'{"Blend (current)":<18} {bl_bg*100:>8.2f} {bl_b*100:>9.2f} {bl_m*100:>7.2f}')
-        print(f'{"UncOnly (fix)":<18} {uc_bg*100:>8.2f} {uc_b*100:>9.2f} {uc_m*100:>7.2f}')
+        print(f'{"-"*45}')
+        print(f'{"GMM-Refine":<18} {iou_bg*100:>8.2f} {iou_bld*100:>9.2f} {miou*100:>7.2f}')
         print(f'{"Pseudo (input)":<18} {pseudo_bg*100:>8.2f} {pseudo_b*100:>9.2f} {pseudo_m*100:>7.2f}')
-        print(f'{"="*55}')
-        print(f'\nΔ Stage1    vs Pseudo: {(s1_m - pseudo_m)*100:+.2f}%')
-        print(f'Δ Blend     vs Pseudo: {(bl_m - pseudo_m)*100:+.2f}%')
-        print(f'Δ UncOnly   vs Pseudo: {(uc_m - pseudo_m)*100:+.2f}%')
+        print(f'{"-"*45}')
+        print(f'Δ GMM-Refine vs Pseudo: {(miou - pseudo_m)*100:+.2f}%')
+        print(f'{"="*45}')
 
     print(f'\nImages evaluated: {total_num}')
     if SAVE_VIS:
-        print(f'Visualizations: {VIS_DIR}')
+        print(f'Visualizations saved to: {VIS_DIR}')
 
 
 if __name__ == '__main__':
