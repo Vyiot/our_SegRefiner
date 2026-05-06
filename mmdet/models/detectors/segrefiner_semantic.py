@@ -292,8 +292,6 @@ class SegRefinerSemantic(SegRefiner):
         target, x_last, img, current_device, has_global = self.get_train_input(**kwargs)
         
         B_total = img.shape[0]
-        t = torch.zeros(B_total, dtype=torch.long, device=current_device)
-
         # Uniform sampling (chuẩn paper)
         t = torch.randint(0, self.num_timesteps, (B_total,), device=current_device)
 

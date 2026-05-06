@@ -1156,7 +1156,11 @@ class LoadOEMCoarseMasks:
             )
             
             # Lưu raw maps giữ nguyên kích thước gốc để CropAuxMaps crop đồng bộ
-            results['unc_map'] = uncertainty_map.astype(np.float32)
+            # uncertainty_map có thể là None khi cả use_obj và use_unc đều False (ví dụ exp3)
+            if uncertainty_map is not None:
+                results['unc_map'] = uncertainty_map.astype(np.float32)
+            else:
+                results['unc_map'] = np.zeros(gt_mask.shape, dtype=np.float32)
             results['edge_map'] = edge_map.astype(np.float32)
 
         results['gt_masks'] = BitmapMasks([gt_mask], gt_mask.shape[0], gt_mask.shape[1])
@@ -1307,33 +1311,29 @@ class RandomCropAll:
         self.unc_jitter = unc_jitter  # jitter pixels quanh tâm uncertain
 
     def _get_crop_origin(self, H, W, unc_map):
-        """Tính điểm crop (y1, x1): luôn crop vào vùng unc cao nhất.
-        Fallback về random chỉ khi unc_map=None hoặc max < 0.3.
+        """Tính điểm crop (y1, x1): sample ngẫu nhiên có trọng số từ
+        tất cả pixel có unc > 0.3, thay vì luôn chọn pixel cao nhất.
+        Fallback về random chỉ khi unc_map=None hoặc không có pixel > 0.3.
         """
         margin_h = max(H - self.crop_h, 0)
         margin_w = max(W - self.crop_w, 0)
 
-        # Luôn crop vào vùng uncertain cao nhất
-        if (unc_map is not None
-                and unc_map.max() > 0.3):
-            # Tìm pixel có uncertainty cao nhất → làm tâm crop
-            cy, cx = np.unravel_index(unc_map.argmax(), unc_map.shape)
-            # Jitter ngẫu nhiên quanh tâm để tăng đa dạng
-            jitter_y = np.random.randint(-self.unc_jitter, self.unc_jitter + 1)
-            jitter_x = np.random.randint(-self.unc_jitter, self.unc_jitter + 1)
-            cy = int(cy) + jitter_y
-            cx = int(cx) + jitter_x
-            # Tính y1, x1 sao cho tâm nằm trong crop
-            y1 = cy - self.crop_h // 2
-            x1 = cx - self.crop_w // 2
-            # Clamp vào [0, margin]
-            y1 = int(np.clip(y1, 0, margin_h))
-            x1 = int(np.clip(x1, 0, margin_w))
-        else:
-            # Fallback: random crop như cũ
-            y1 = np.random.randint(0, margin_h + 1)
-            x1 = np.random.randint(0, margin_w + 1)
+        if unc_map is not None:
+            unc_mask     = unc_map > 0.3                              # pixels đủ uncertain
+            weights_flat = (unc_map * unc_mask).ravel().astype(np.float64)
+            total        = weights_flat.sum()
+            if total > 0:
+                # Sample ngẫu nhiên theo trọng số (unc cao → xác suất được chọn cao hơn)
+                weights_flat /= total
+                chosen_idx = np.random.choice(len(weights_flat), p=weights_flat)
+                cy, cx     = np.unravel_index(chosen_idx, unc_map.shape)
+                y1 = int(np.clip(cy - self.crop_h // 2, 0, margin_h))
+                x1 = int(np.clip(cx - self.crop_w // 2, 0, margin_w))
+                return y1, x1
 
+        # Fallback: không có vùng uncertain → crop ngẫu nhiên
+        y1 = np.random.randint(0, margin_h + 1)
+        x1 = np.random.randint(0, margin_w + 1)
         return y1, x1
 
     def __call__(self, results):

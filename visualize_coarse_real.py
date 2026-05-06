@@ -20,7 +20,7 @@ from sklearn.mixture import GaussianMixture
 # ─── CẤU HÌNH ────────────────────────────────────────────────────────────────
 DATA_ROOT = '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'
 CITY      = 'houston'
-NAME      = 'houston_9'
+NAME      = 'houston_42'
 T_MAX     = 6          # num_timesteps — betas_cumprod có 6 phần tử
 
 # Beta schedule chuẩn bài báo: t=0 → 0.8 (sạch nhất), t=5 → 0.0 (bẩn nhất)
@@ -33,7 +33,7 @@ TAU_UNC = 0.5
 # ─── ABLATION FLAGS (Bật/Tắt nhiễu) ──────────────────────────────────────────
 USE_OBJ = True   # Eq.7: Object-level deletion
 USE_BND = True   # Eq.8: Boundary dilation
-USE_UNC = True   # Eq.6: Uncertainty erosion
+USE_UNC = False   # Eq.6: Uncertainty erosion
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ─── ĐỌC DỮ LIỆU ─────────────────────────────────────────────────────────────

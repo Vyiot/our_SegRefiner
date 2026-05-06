@@ -36,5 +36,5 @@ data = dict(
         dict(type='DefaultFormatBundle'),
         dict(type='Collect', keys=['img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map']),
     ]),
-    train_dataloader=dict(samples_per_gpu=16, workers_per_gpu=4),
+    train_dataloader=dict(samples_per_gpu=4, workers_per_gpu=1),
 )
