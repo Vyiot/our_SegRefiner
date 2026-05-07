@@ -3,6 +3,7 @@ import warnings
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 warnings.filterwarnings('ignore')
 
+
 """
 infer.py  —  GMM-guided refinement inference
 ==============================================
@@ -36,18 +37,26 @@ from mmcv.parallel import collate, scatter
 
 ROOT_DIR         = osp.abspath(osp.join(osp.dirname(__file__), '..'))
 CONFIG_FILE      = osp.join(ROOT_DIR, 'configs/segrefiner/exp8_all.py')
-CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs/exp8_all/best_model1.pth')
-VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs/exp8_all/vis_gmm_refine')
+CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs/exp8_all_8/best_model1.pth')
+VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs/exp8_all_8/vis_gmm_refine')
 DEVICE           = 'cuda:0'
 BATCH_SIZE       = 1
 NUM_WORKERS      = 4
 SAVE_VIS         = True
 VIS_MAX          = 9999   # lưu tất cả ảnh
 
+# Override dataset (None = dùng val set trong config)
+VAL_DATA_ROOT    = None  # None = dùng val set trong config (OEM_v2_Building/val.txt)
+VAL_PSEUDO_DIR   = 'pseudolabels'   # tên thư mục pseudo-label trong VAL_DATA_ROOT
+
 PATCH_SIZE       = 256          # kích thước patch local
-UNC_THRESHOLD    = 0.4          # pixel có unc_map > ngưỡng này → cần sửa
+UNC_THRESHOLD    = 0.3          # pixel có unc_map > ngưỡng này → cần sửa (giống RandomCropAll train)
 MAX_LOCAL_PATCHES = 48          # số patch tối đa mỗi ảnh
 NMS_IOU_THR      = 0.3          # NMS IoU threshold để lọc patch chồng lấp
+
+# Chỉ chạy trên ảnh này để test nhanh (None = chạy tất cả)
+TARGET_IMAGE     = None  # None = chạy tất cả
+
 
 
 # ============================================================
@@ -63,9 +72,10 @@ def compute_gmm_uncertainty(img_rgb: np.ndarray) -> np.ndarray:
     H, W, C = img_rgb.shape
     pixels   = img_rgb.astype(np.float32).reshape(-1, C) / 255.0
 
-    # Subsample để tăng tốc
+    # Subsample để tăng tốc — dùng local RNG cố định để GMM deterministic
+    rng      = np.random.RandomState(42)
     n_sub    = min(50_000, pixels.shape[0])
-    idx      = np.random.choice(pixels.shape[0], n_sub, replace=False)
+    idx      = rng.choice(pixels.shape[0], n_sub, replace=False)
     sub      = pixels[idx]
 
     # Chọn K tốt nhất bằng BIC
@@ -106,11 +116,12 @@ def _to_binary(arr):
     return arr
 
 
-def compute_pseudo_iou(dataset):
+def compute_pseudo_iou(dataset, img_names_filter=None):
     pseudo_dir = osp.join(dataset.data_root, 'pseudolabels')
     label_dir  = osp.join(dataset.data_root, 'labels')
     ri, ru, ri_bg, ru_bg = 0, 0, 0, 0
-    for img_name in dataset.img_names:
+    names = img_names_filter if img_names_filter is not None else dataset.img_names
+    for img_name in names:
         basename = osp.splitext(img_name)[0]
         pseudo = cv2.imread(osp.join(pseudo_dir, img_name), cv2.IMREAD_GRAYSCALE)
         gt     = cv2.imread(osp.join(label_dir,  basename + '.tif'), cv2.IMREAD_GRAYSCALE)
@@ -187,24 +198,36 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
     # Giống training: pixel uncertain cao → model được trust hơn để sửa
     unc_tensor = torch.from_numpy(unc_map).to(device).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
 
-    # ── Bước 2: Sliding-window candidates dựa vào unc_map ───────────────────
-    stride = P // 2
-    ys = list(range(0, max(1, H - P + 1), stride))
-    xs = list(range(0, max(1, W - P + 1), stride))
-    if ys and ys[-1] < H - P: ys.append(H - P)
-    if xs and xs[-1] < W - P: xs.append(W - P)
-    if H <= P: ys = [0]
-    if W <= P: xs = [0]
+    # ── Bước 2: Tìm patches centered on uncertain pixels ─────────────────────
+    # Giống RandomCropAll trong train: pixel có unc > 0.3 làm tâm patch
+    half_P = P // 2
+    unc_mask_bin = (unc_map > UNC_THRESHOLD)
+    ys_unc, xs_unc = np.where(unc_mask_bin)
 
     candidates = []
-    for y1 in ys:
-        for x1 in xs:
+    if len(ys_unc) > 0:
+        # Subsample tối đa 200 tâm để tránh tạo quá nhiều candidates
+        rng_patch = np.random.RandomState(0)
+        n_centers = min(200, len(ys_unc))
+        chosen = rng_patch.choice(len(ys_unc), n_centers, replace=False)
+        for i in chosen:
+            cy, cx = int(ys_unc[i]), int(xs_unc[i])
+            y1 = int(np.clip(cy - half_P, 0, max(0, H - P)))
+            x1 = int(np.clip(cx - half_P, 0, max(0, W - P)))
             y2 = min(y1 + P, H)
             x2 = min(x1 + P, W)
-            patch_unc = unc_map[y1:y2, x1:x2]
-            # Score = tỷ lệ pixel bất định trong patch
-            score = float((patch_unc > UNC_THRESHOLD).mean())
-            if score > 0:
+            score = float(unc_map[y1:y2, x1:x2].mean())
+            candidates.append((score, y1, x1, y2, x2))
+
+    # Fallback: không có vùng uncertain → sliding window đơn giản
+    if not candidates:
+        stride = P // 2
+        ys_sw = list(range(0, max(1, H - P + 1), stride)) or [0]
+        xs_sw = list(range(0, max(1, W - P + 1), stride)) or [0]
+        for y1 in ys_sw:
+            for x1 in xs_sw:
+                y2, x2 = min(y1 + P, H), min(x1 + P, W)
+                score = float(unc_map[y1:y2, x1:x2].mean())
                 candidates.append((score, y1, x1, y2, x2))
 
     kept = nms_patches(candidates, MAX_LOCAL_PATCHES, NMS_IOU_THR)
@@ -266,6 +289,7 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
                 print(f'    t={i}: logit_mean={x_mean_before:.4f} → sigmoid_mean={float(cur_x.mean()):.4f}'
                       f'  fine_probs_mean={float(cur_fine_probs.mean()):.4f}')
             else:
+                # Bernoulli sampling theo công thức paper (Eq.11)
                 fine_map     = (torch.rand_like(cur_fine_probs) < cur_fine_probs).float()
                 pred_x_start = (cur_x >= 0).float()
                 cur_x        = pred_x_start * fine_map + mask_patch * (1 - fine_map)
@@ -305,7 +329,7 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
     total_removed = float(((result_np == 0) & (c_mask_np == 1)).mean()) * 100
     print(f'  [Blend-Final] total_added={total_added:.2f}%  total_removed={total_removed:.2f}%')
 
-    # Build vis_steps: full image blend TẤT CẢ patches tại mỗi timestep
+    # Build vis_steps
     vis_steps = []
     for i in all_indices:
         no_p = (_step_w[i] == 0)
@@ -322,6 +346,18 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
 # ============================================================
 def main():
     cfg = Config.fromfile(CONFIG_FILE)
+
+    # Override dataset nếu VAL_DATA_ROOT được chỉ định
+    if VAL_DATA_ROOT:
+        cfg.data.val.data_root = VAL_DATA_ROOT
+        cfg.data.val.split_file = osp.join(VAL_DATA_ROOT, 'test1.txt')
+        # Cập nhật pseudolabel_dir trong val_pipeline
+        for step in cfg.data.val.pipeline:
+            if step.get('type') == 'LoadOEMCoarseMasks':
+                step['pseudolabel_dir'] = osp.join(VAL_DATA_ROOT, VAL_PSEUDO_DIR)
+                break
+        print(f'[Dataset Override] data_root = {VAL_DATA_ROOT}')
+        print(f'[Dataset Override] pseudo    = {VAL_PSEUDO_DIR}/')
 
     # Build val dataset
     # Xóa vis cũ để tránh lẫn ảnh cũ
@@ -364,10 +400,19 @@ def main():
     ri, ru, ri_bg, ru_bg = 0, 0, 0, 0
     total_num = 0
     vis_count = 0
+    evaluated_names = []   # tên ảnh đã evaluate (để tính pseudo IoU đúng)
     label_dir = osp.join(val_dataset.data_root, 'labels')
 
     for batch_idx, data in enumerate(val_loader):
-        print(f'\n━━━ Image [{batch_idx+1}/{len(val_loader)}] ━━━')
+        # Lọc chỉ ảnh target
+        try:
+            _name = data['img_metas'].data[0][0].get('ori_filename', '')
+        except Exception:
+            _name = ''
+        if TARGET_IMAGE and _name != TARGET_IMAGE:
+            continue
+
+        print(f'\n━━━ Image [{batch_idx+1}/{len(val_loader)}]  {_name} ━━━')
         gpu_id   = int(DEVICE.split(':')[-1]) if ':' in DEVICE else 0
         data_gpu = scatter(data, [gpu_id])[0]
 
@@ -426,11 +471,26 @@ def main():
             return pred
 
         pred_aligned = align_pred(result_np, gt_mask)
-
-        # Accumulate IoU
-        ri, ru, ri_bg, ru_bg = _iou_accum(pred_aligned, gt_mask,
-                                           ri, ru, ri_bg, ru_bg)
+        ri, ru, ri_bg, ru_bg = _iou_accum(pred_aligned, gt_mask, ri, ru, ri_bg, ru_bg)
+        evaluated_names.append(img_name)
         total_num += 1
+
+        # Per-image IoU log: Pseudo vs Refined + delta
+        p = pred_aligned.astype(bool)
+        g = gt_mask.astype(bool)
+        _bld_ref = np.count_nonzero(p & g) / max(np.count_nonzero(p | g), 1) * 100
+
+        # Resize coarse mask về GT shape nếu cần
+        c_aligned = c_mask_np
+        if c_aligned.shape != gt_mask.shape:
+            c_aligned = cv2.resize(c_aligned, (gt_mask.shape[1], gt_mask.shape[0]),
+                                   interpolation=cv2.INTER_NEAREST)
+        c = c_aligned.astype(bool)
+        _bld_pseudo = np.count_nonzero(c & g) / max(np.count_nonzero(c | g), 1) * 100
+
+        _delta = _bld_ref - _bld_pseudo
+        _sign  = '+' if _delta >= 0 else ''
+        print(f'  [IoU vs GT]  pseudo={_bld_pseudo:.2f}%  refined={_bld_ref:.2f}%  Δ={_sign}{_delta:.2f}%')
 
         # ── Visualization: 1 ảnh duy nhất chứa toàn bộ pipeline ────────────
         if SAVE_VIS:
@@ -470,17 +530,22 @@ def main():
                                      ).permute(2, 0, 1).unsqueeze(0)
                 return F.interpolate(t, (S, S), mode='nearest')[0]
 
-            # Panels: RGB | Pseudo | GMM-Unc | t=5(p0) | ... | t=0(p0) | Refined | Diff | GT
+            # Panels: RGB | Pseudo | GMM-Unc | t=5..t=0 | Refined | Diff | GT
             panels = [img_to_t(img_np), to_t(c_mask_np), unc_to_t(unc_map)]
             labels = ['RGB', 'Pseudo', 'GMM-Unc']
 
-            for lbl, step_arr in vis_steps:  # [("t=5", arr), ..., ("t=0", arr)]
+            for lbl, step_arr in vis_steps:
                 panels.append(to_t(step_arr))
-                labels.append(lbl + '(all)')   # hiển thị tất cả patches được blend tại step này
+                labels.append(lbl + '(all)')
 
-            # Refined = kết quả thực sự (blend tất cả patches)
-            panels += [to_t(result_np), diff_to_t(c_mask_np, result_np), to_t(gt_mask)]
-            labels += ['Refined(all)', 'Diff(R=del G=add)', 'GT']
+            panels.append(to_t(result_np))
+            labels.append('Refined')
+
+            panels.append(diff_to_t(c_mask_np, result_np))
+            labels.append('Diff(R=del G=add)')
+
+            panels += [to_t(gt_mask)]
+            labels += ['GT']
 
             grid  = vutils.make_grid(panels, nrow=len(panels), padding=4, pad_value=0.5)
             ndarr = grid.mul(255).clamp(0, 255).permute(1, 2, 0).to(torch.uint8).numpy()
@@ -496,38 +561,39 @@ def main():
 
         # Progress
         if (batch_idx + 1) % 50 == 0:
-            b_run  = ri / max(ru, 1) * 100
+            b_run  = ri / max(ru,  1) * 100
             bg_run = ri_bg / max(ru_bg, 1) * 100
             print(f'  [{batch_idx+1}/{len(val_loader)}]  '
                   f'bld={b_run:.2f}%  bg={bg_run:.2f}%  '
                   f'mIoU={(b_run+bg_run)/2:.2f}%')
 
     # ── Final metrics ─────────────────────────────────────────────────────────
-    iou_bld  = ri    / max(ru,    1)
-    iou_bg   = ri_bg / max(ru_bg, 1)
-    miou     = (iou_bld + iou_bg) / 2
+    iou_bld = ri    / max(ru,    1)
+    iou_bg  = ri_bg / max(ru_bg, 1)
+    miou    = (iou_bld + iou_bg) / 2
 
-    pseudo_b, pseudo_bg = compute_pseudo_iou(val_dataset)
+    pseudo_b, pseudo_bg = compute_pseudo_iou(val_dataset, img_names_filter=evaluated_names)
     pseudo_m = (pseudo_b + pseudo_bg) / 2
 
     try:
         from terminaltables import AsciiTable
         table_data = [
-            ['Class',      'GMM-Refine',          'Pseudo (input)'],
-            ['background', f'{iou_bg*100:.2f}',   f'{pseudo_bg*100:.2f}'],
-            ['building',   f'{iou_bld*100:.2f}',  f'{pseudo_b*100:.2f}'],
-            ['mIoU',       f'{miou*100:.2f}',      f'{pseudo_m*100:.2f}'],
+            ['Class',      'GMM-Refined',          'Pseudo (input)'],
+            ['background', f'{iou_bg*100:.2f}',     f'{pseudo_bg*100:.2f}'],
+            ['building',   f'{iou_bld*100:.2f}',    f'{pseudo_b*100:.2f}'],
+            ['mIoU',       f'{miou*100:.2f}',        f'{pseudo_m*100:.2f}'],
+            ['Δ vs Pseudo', f'{(miou-pseudo_m)*100:+.2f}', '-'],
         ]
         print('\n' + AsciiTable(table_data).table)
     except ImportError:
-        print(f'\n{"="*45}')
+        print(f'\n{"="*50}')
         print(f'{"Mode":<18} {"bg IoU":>8} {"bld IoU":>9} {"mIoU":>7}')
-        print(f'{"-"*45}')
-        print(f'{"GMM-Refine":<18} {iou_bg*100:>8.2f} {iou_bld*100:>9.2f} {miou*100:>7.2f}')
+        print(f'{"-"*50}')
+        print(f'{"GMM-Refined":<18} {iou_bg*100:>8.2f} {iou_bld*100:>9.2f} {miou*100:>7.2f}')
         print(f'{"Pseudo (input)":<18} {pseudo_bg*100:>8.2f} {pseudo_b*100:>9.2f} {pseudo_m*100:>7.2f}')
-        print(f'{"-"*45}')
-        print(f'Δ GMM-Refine vs Pseudo: {(miou - pseudo_m)*100:+.2f}%')
-        print(f'{"="*45}')
+        print(f'{"-"*50}')
+        print(f'Δ GMM vs Pseudo: {(miou-pseudo_m)*100:+.2f}%')
+        print(f'{"="*50}')
 
     print(f'\nImages evaluated: {total_num}')
     if SAVE_VIS:

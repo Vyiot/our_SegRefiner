@@ -14,13 +14,16 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from skimage import measure
 from sklearn.mixture import GaussianMixture
+from mmdet.datasets.pipelines.loading import modify_boundary
 
 # ─── CẤU HÌNH ────────────────────────────────────────────────────────────────
 DATA_ROOT = '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'
-CITY      = 'houston'
-NAME      = 'houston_42'
+CITY      = 'austin'
+NAME      = 'austin_1'
 T_MAX     = 6          # num_timesteps — betas_cumprod có 6 phần tử
 
 # Beta schedule chuẩn bài báo: t=0 → 0.8 (sạch nhất), t=5 → 0.0 (bẩn nhất)
@@ -33,7 +36,7 @@ TAU_UNC = 0.5
 # ─── ABLATION FLAGS (Bật/Tắt nhiễu) ──────────────────────────────────────────
 USE_OBJ = True   # Eq.7: Object-level deletion
 USE_BND = True   # Eq.8: Boundary dilation
-USE_UNC = False   # Eq.6: Uncertainty erosion
+USE_UNC = True   # Eq.6: Uncertainty erosion
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ─── ĐỌC DỮ LIỆU ─────────────────────────────────────────────────────────────
@@ -123,16 +126,19 @@ def q_sample_vis(t):
     # ── Eq. 9: M_sp_t = M_bnd_t ∪ M_unc_t ───────────────────────────────────
     M_sp = ((M_bnd > 0.5) | (M_unc > 0.5)).astype(np.float32)
 
-    # ── Eq. 10: M_pixel-applied_t — base = M_fine (gt), flip vùng M_sp ──────
-    # Paper: M_pixel_applied(i,j) = 1-M_fine nếu ∈ M_sp, M_fine nếu không
-    M_pixel_applied = gt.copy()                              # base = M_fine = gt
-    M_pixel_applied[M_sp > 0.5] = 1.0 - gt[M_sp > 0.5]    # flip pixel trong M_sp
+    # ── Eq. 10: M_pixel_applied = M_sp & GT (AND) ───────────────────────────
+    # 0,0→0  0,1→0  1,0→0  1,1→1
+    M_pixel_applied = (M_sp * gt).astype(np.float32)
 
     # ── Eq. 11: m_t = τ·M_obj_t + (1−τ)·M_pixel_applied_t ────────────
     tau = (np.random.rand(*gt.shape) < beta_b).astype(np.float32)
     m_t = tau * M_obj + (1 - tau) * M_pixel_applied
 
-    return (m_t >= 0.5).astype(np.float32), M_obj, M_bnd, M_unc, M_sp
+    # ── Sau Eq.11: áp modify_boundary (nhiễu biên nguyên gốc SegRefiner) ──────
+    m_t_uint8 = (m_t >= 0.5).astype(np.uint8) * 255
+    m_t_mb    = modify_boundary(m_t_uint8)          # trả về binary {0,1}
+
+    return m_t_mb.astype(np.float32), M_obj, M_bnd, M_unc, M_sp
 
 # ─── VISUALIZE ───────────────────────────────────────────────────────────────
 STEPS = list(range(T_MAX))   # t = 0, 1, 2, 3, 4, 5

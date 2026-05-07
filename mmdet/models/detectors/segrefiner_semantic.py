@@ -6,6 +6,7 @@ from scipy import ndimage as ndi
 from .segrefiner_base import SegRefiner
 from ..builder import DETECTORS, build_head, build_loss
 from mmcv.ops import nms
+from mmdet.datasets.pipelines.loading import modify_boundary
 
 @DETECTORS.register_module()
 class SegRefinerSemantic(SegRefiner):
@@ -302,23 +303,9 @@ class SegRefinerSemantic(SegRefiner):
         iou_pred = self.cal_iou(target, pred_logits)
         
         losses = dict()
-
-        # ── Uncertainty-Weighted Loss ──────────────────────────────────────────
-        # Tính trọng số dựa trên Uncertainty Map (GMM)
-        # un_weight giúp model tập trung vào các vùng biên và vùng nhãn sai
-        unc_weight = 1.0
-        if self._cur_unc_map is not None:
-            # Đảm bảo shape khớp (B, 1, H, W)
-            u_map = self._cur_unc_map
-            if u_map.dim() == 3: u_map = u_map.unsqueeze(1)
-            unc_weight = 1.0 + 2.0 * u_map.clamp(0.0, 1.0)
-
         # Tỷ lệ 2:1 (Lấp đầy : Biên) theo paper
-        losses['loss_mask'] = self.loss_mask(
-            pred_logits, target, weight=unc_weight) * 2.0
-        
-        losses['loss_texture'] = self._get_texture_loss(
-            pred_logits.sigmoid(), target, weight=unc_weight) * 0.2
+        losses['loss_mask'] = self.loss_mask(pred_logits, target) * 2.0
+        losses['loss_texture'] = self.loss_texture(pred_logits, target) * 0.2  # 5.0 * 0.2 = 1.0 → ratio 2:1
         
         losses['iou'] = iou_pred.mean()
 
@@ -429,16 +416,20 @@ class SegRefinerSemantic(SegRefiner):
                 else:
                     M_unc_region = unc_binary
 
-            # ── Eq.10: M_pixel-applied_t — base = M_fine (gt), flip vùng M_sp ─
-            # Paper: M_pixel_applied(i,j) = 1-M_fine nếu ∈ M_sp, M_fine otherwise
-            M_pixel_applied = gt_b.clone()                                    # base = M_fine
-            M_pixel_applied[M_bnd      > 0.5] = 1.0 - gt_b[M_bnd      > 0.5]  # flip M_bnd
-            M_pixel_applied[M_unc_region > 0.5] = 1.0 - gt_b[M_unc_region > 0.5]  # flip M_unc
+            # ── Eq.10: M_pixel_applied = M_sp & GT (AND) ───────────────────────────
+            M_sp = ((M_bnd > 0.5) | (M_unc_region > 0.5)).float()
+            M_pixel_applied = (M_sp * gt_b).float()
 
             # ── Eq.11: m_t = τ·M_obj_t + (1−τ)·M_pixel_applied_t ────────────
             # τ ~ Bernoulli(β̄_t): t=0→β=0.8 (mostly M_obj/sạch), t=5→β=0 (toàn M_pixel_applied/bẩn)
             tau = (torch.rand_like(gt_b) < beta_b).float()
             m_t = tau * M_obj + (1 - tau) * M_pixel_applied
+
+            # ── Sau Eq.11: áp modify_boundary (nhiễu biên nguyên gốc SegRefiner) ──────
+            m_t_np = (m_t.detach().cpu().numpy()[0, 0] * 255).astype(np.uint8)
+            m_t_mb = modify_boundary(m_t_np)  # trả về binary {0, 1}
+            m_t = torch.from_numpy(m_t_mb).to(current_device).float().unsqueeze(0).unsqueeze(0)
+
             results.append(m_t)
 
         return torch.cat(results, dim=0)

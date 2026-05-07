@@ -15,9 +15,10 @@ def compute_gmm_uncertainty(img_rgb_np: np.ndarray) -> np.ndarray:
     H, W, C = img_rgb_np.shape
     pixels   = img_rgb_np.astype(np.float32).reshape(-1, C) / 255.0
 
-    # Subsample để tăng tốc
+    # Subsample để tăng tốc — dùng local RNG cố định để GMM deterministic
+    rng      = np.random.RandomState(42)
     n_sub    = min(50_000, pixels.shape[0])
-    idx      = np.random.choice(pixels.shape[0], n_sub, replace=False)
+    idx      = rng.choice(pixels.shape[0], n_sub, replace=False)
     sub      = pixels[idx]
 
     # Chọn K tốt nhất bằng BIC
@@ -60,37 +61,58 @@ def nms_patches(candidates, max_patches, iou_threshold):
 @torch.no_grad()
 def gmm_refine_pipeline(model, img_tensor, img_rgb_np, c_mask_np, device, return_vis=False):
     """
-    Implementation of the refinement logic from infer.py.
+    Refinement pipeline căn chỉnh với train: tìm vùng uncertain → top-48 patches.
+
+    Thay vì sliding window cố định, dùng uncertainty-aware patch selection:
+    - Tìm tất cả pixel có unc > 0.3 (giống RandomCropAll trong train)
+    - Tạo patch 256×256 centered trên từng pixel uncertain
+    - Score = mean unc trong patch → chọn top 48 qua NMS
     """
     H, W = img_tensor.shape[-2:]
     P = 256
-    UNC_THRESHOLD = 0.4
-    MAX_LOCAL_PATCHES = 48
+    UNC_THRESHOLD = 0.3   # Giống RandomCropAll.unc_map > 0.3 trong train
+    MAX_LOCAL_PATCHES = 48  # Top 48 để cover nhiều vùng uncertain hơn
     NMS_IOU_THR = 0.3
 
-    # 1. GMM
+    # 1. GMM uncertainty (giống train pipeline)
     unc_map = compute_gmm_uncertainty(img_rgb_np)
     unc_tensor = torch.from_numpy(unc_map).to(device).unsqueeze(0).unsqueeze(0)
 
-    # 2. Patch Candidates
-    stride = P // 2
-    ys = list(range(0, max(1, H - P + 1), stride))
-    xs = list(range(0, max(1, W - P + 1), stride))
-    if ys and ys[-1] < H - P: ys.append(H - P)
-    if xs and xs[-1] < W - P: xs.append(W - P)
-    if H <= P: ys = [0]
-    if W <= P: xs = [0]
+    # 2. Tìm patches centered on uncertain pixels — giống RandomCropAll trong train
+    #    Lấy tất cả pixel có unc > 0.3, tạo patch 256×256 centered trên đó
+    #    Score = mean unc trong patch → NMS giữ top 48
+    half_P = P // 2
+    unc_mask_bin = (unc_map > UNC_THRESHOLD)
+    ys_unc, xs_unc = np.where(unc_mask_bin)
 
     candidates = []
-    for y1 in ys:
-        for x1 in xs:
-            y2, x2 = min(y1 + P, H), min(x1 + P, W)
-            score = float((unc_map[y1:y2, x1:x2] > UNC_THRESHOLD).mean())
-            if score > 0:
+    if len(ys_unc) > 0:
+        # Subsample tâm để không tạo quá nhiều candidates (tối đa 200)
+        rng = np.random.RandomState(0)
+        n_centers = min(200, len(ys_unc))
+        chosen = rng.choice(len(ys_unc), n_centers, replace=False)
+        for i in chosen:
+            cy, cx = int(ys_unc[i]), int(xs_unc[i])
+            y1 = int(np.clip(cy - half_P, 0, max(0, H - P)))
+            x1 = int(np.clip(cx - half_P, 0, max(0, W - P)))
+            y2 = min(y1 + P, H)
+            x2 = min(x1 + P, W)
+            score = float(unc_map[y1:y2, x1:x2].mean())
+            candidates.append((score, y1, x1, y2, x2))
+
+    # Fallback: không có vùng uncertain → sliding window đơn giản
+    if not candidates:
+        stride = P // 2
+        ys_sw = list(range(0, max(1, H - P + 1), stride)) or [0]
+        xs_sw = list(range(0, max(1, W - P + 1), stride)) or [0]
+        for y1 in ys_sw:
+            for x1 in xs_sw:
+                y2, x2 = min(y1 + P, H), min(x1 + P, W)
+                score = float(unc_map[y1:y2, x1:x2].mean())
                 candidates.append((score, y1, x1, y2, x2))
 
     kept = nms_patches(candidates, MAX_LOCAL_PATCHES, NMS_IOU_THR)
-    
+
     c_tensor = torch.from_numpy(c_mask_np.astype(np.float32)).to(device)
     base_mask = c_tensor.unsqueeze(0).unsqueeze(0)
 
@@ -98,7 +120,7 @@ def gmm_refine_pipeline(model, img_tensor, img_rgb_np, c_mask_np, device, return
         res = (base_mask[0, 0] >= 0.5).cpu().numpy().astype(np.uint8)
         return (res, unc_map, []) if return_vis else res
 
-    # 3. Denoising
+    # 3. Denoising — Cosine window weighted blend
     w_1d = torch.sin(torch.linspace(0, np.pi, P, device=device))
     patch_weight = (w_1d.view(-1, 1) * w_1d.view(1, -1)).view(1, 1, P, P)
 
@@ -126,18 +148,15 @@ def gmm_refine_pipeline(model, img_tensor, img_rgb_np, c_mask_np, device, return
         cur_x = mask_patch.clone()
         cur_fine_probs = fp_patch.clone()
 
-        p_weight_vis = patch_weight[:, :, :ph, :pw]
-
         for i in all_indices:
             t_idx = torch.tensor([i], device=device)
             model_input = torch.cat((img_patch, cur_x), dim=1)
             cur_x, cur_fine_probs = model.p_sample(model_input, cur_fine_probs, t_idx)
 
-            # vis_val: Dùng để visualize bước này (trước khi update cho bước sau hoặc sau khi update)
-            # Theo infer.py: ta visualize kết quả sau khi đã xử lý (sigmoid cho t=0, threshold+blend cho t>0)
             if i == 0:
                 vis_val = cur_x.sigmoid().detach()
             else:
+                # Bernoulli sampling theo công thức paper (Eq.11)
                 fine_map = (torch.rand_like(cur_fine_probs) < cur_fine_probs).float()
                 pred_x_start = (cur_x >= 0).float()
                 vis_val = (pred_x_start * fine_map + mask_patch * (1 - fine_map)).detach()
@@ -151,7 +170,7 @@ def gmm_refine_pipeline(model, img_tensor, img_rgb_np, c_mask_np, device, return
             if i == 0:
                 cur_x = cur_x.sigmoid()
             else:
-                cur_x = vis_val.clone() # Đã tính ở trên rồi
+                cur_x = vis_val.clone()
 
         accum_mask[:, :, y1:y2, x1:x2] += cur_x[:, :, :ph, :pw] * patch_weight[:, :, :ph, :pw]
         accum_weight[:, :, y1:y2, x1:x2] += patch_weight[:, :, :ph, :pw]
@@ -176,4 +195,3 @@ def gmm_refine_pipeline(model, img_tensor, img_rgb_np, c_mask_np, device, return
         vis_steps.append((f't={i}(all)', step_full))
 
     return final_np, unc_map, vis_steps
-

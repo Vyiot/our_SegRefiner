@@ -4,7 +4,7 @@ log_config = dict(
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 load_from = None
-resume_from = None
+resume_from = 'work_dirs/exp8_all_8/best_model1.pth'
 workflow = [('train', 1)]
 opencv_num_threads = 0
 mp_start_method = 'spawn'
@@ -226,7 +226,7 @@ lr_config = dict(
     warmup_by_epoch=False,
     warmup_ratio=0.001,
     warmup_iters=500)
-oem_eval = dict(interval=500, save_best=True)
+oem_eval = dict(interval=500, num_images=10, save_best=True)
 interval = 1
 work_dir = 'work_dirs/exp8_all'
 auto_resume = False
