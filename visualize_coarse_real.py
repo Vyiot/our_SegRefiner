@@ -22,8 +22,8 @@ from mmdet.datasets.pipelines.loading import modify_boundary
 
 # ─── CẤU HÌNH ────────────────────────────────────────────────────────────────
 DATA_ROOT = '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'
-CITY      = 'austin'
-NAME      = 'austin_1'
+CITY      = 'san_tome'
+NAME      = 'san_tome_1'
 T_MAX     = 6          # num_timesteps — betas_cumprod có 6 phần tử
 
 # Beta schedule chuẩn bài báo: t=0 → 0.8 (sạch nhất), t=5 → 0.0 (bẩn nhất)

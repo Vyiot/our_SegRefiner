@@ -4,7 +4,7 @@ log_config = dict(
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 load_from = None
-resume_from = 'work_dirs/exp8_all/last.pth'
+resume_from = 'work_dirs/exp8_all/best_model1.pth'
 workflow = [('train', 1)]
 opencv_num_threads = 0
 mp_start_method = 'spawn'

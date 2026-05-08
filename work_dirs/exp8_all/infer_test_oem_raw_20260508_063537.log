@@ -1,0 +1,24 @@
+[Dataset Override] data_root = /home/ubuntu/vy/Denoiser/OEM_v2_Building
+[Dataset Override] pseudo    = pseudolabels/
+Cleared old vis: /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/vis_gmm_refine_test_oem_raw
+Traceback (most recent call last):
+  File "/home/ubuntu/miniconda3/envs/our/lib/python3.8/site-packages/mmcv/utils/registry.py", line 52, in build_from_cfg
+    return obj_cls(**args)
+  File "/home/ubuntu/vy/Denoiser/SegRefiner/mmdet/datasets/oem_building.py", line 91, in __init__
+    self.img_names, self.pipeline = _make_base(
+  File "/home/ubuntu/vy/Denoiser/SegRefiner/mmdet/datasets/oem_building.py", line 24, in _make_base
+    with open(split_file, 'r') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/home/ubuntu/vy/Denoiser/OEM_v2_Building/test1.txt'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "scripts/infer.py", line 604, in <module>
+    main()
+  File "scripts/infer.py", line 369, in main
+    val_dataset = build_dataset(cfg.data.val)
+  File "/home/ubuntu/vy/Denoiser/SegRefiner/mmdet/datasets/builder.py", line 82, in build_dataset
+    dataset = build_from_cfg(cfg, DATASETS, default_args)
+  File "/home/ubuntu/miniconda3/envs/our/lib/python3.8/site-packages/mmcv/utils/registry.py", line 55, in build_from_cfg
+    raise type(e)(f'{obj_cls.__name__}: {e}')
+FileNotFoundError: OEMv2BuildingDataset: [Errno 2] No such file or directory: '/home/ubuntu/vy/Denoiser/OEM_v2_Building/test1.txt'

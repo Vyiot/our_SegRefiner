@@ -37,8 +37,8 @@ from mmcv.parallel import collate, scatter
 
 ROOT_DIR         = osp.abspath(osp.join(osp.dirname(__file__), '..'))
 CONFIG_FILE      = osp.join(ROOT_DIR, 'configs/segrefiner/exp8_all.py')
-CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs/exp8_all_8/best_model1.pth')
-VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs/exp8_all_8/vis_gmm_refine')
+CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs/exp8_all/best_model.pth')
+VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs/exp8_all/vis_gmm_refine_test_oem_raw')
 DEVICE           = 'cuda:0'
 BATCH_SIZE       = 1
 NUM_WORKERS      = 4
@@ -46,8 +46,8 @@ SAVE_VIS         = True
 VIS_MAX          = 9999   # lưu tất cả ảnh
 
 # Override dataset (None = dùng val set trong config)
-VAL_DATA_ROOT    = None  # None = dùng val set trong config (OEM_v2_Building/val.txt)
-VAL_PSEUDO_DIR   = 'pseudolabels'   # tên thư mục pseudo-label trong VAL_DATA_ROOT
+VAL_DATA_ROOT    = '/home/ubuntu/vy/Denoiser/test_oem_raw/test_oem_raw'
+VAL_PSEUDO_DIR   = 'pseudolabels_binary'   # tên thư mục pseudo-label trong VAL_DATA_ROOT
 
 PATCH_SIZE       = 256          # kích thước patch local
 UNC_THRESHOLD    = 0.3          # pixel có unc_map > ngưỡng này → cần sửa (giống RandomCropAll train)
@@ -117,7 +117,7 @@ def _to_binary(arr):
 
 
 def compute_pseudo_iou(dataset, img_names_filter=None):
-    pseudo_dir = osp.join(dataset.data_root, 'pseudolabels')
+    pseudo_dir = osp.join(dataset.data_root, VAL_PSEUDO_DIR)
     label_dir  = osp.join(dataset.data_root, 'labels')
     ri, ru, ri_bg, ru_bg = 0, 0, 0, 0
     names = img_names_filter if img_names_filter is not None else dataset.img_names
