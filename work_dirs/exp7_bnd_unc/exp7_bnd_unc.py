@@ -118,8 +118,8 @@ data = dict(
                 with_seg=True),
             dict(
                 type='LoadOEMCoarseMasks',
-                use_obj=True,
-                use_unc=False,
+                use_obj=False,
+                use_unc=True,
                 test_mode=False),
             dict(type='RandomCropAll', crop_size=256),
             dict(type='RandomFlip', flip_ratio=0.5),
@@ -204,7 +204,7 @@ data = dict(
                 ])
         ],
         test_mode=True),
-    train_dataloader=dict(samples_per_gpu=4, workers_per_gpu=1),
+    train_dataloader=dict(samples_per_gpu=16, workers_per_gpu=4),
     val_dataloader=dict(samples_per_gpu=1, workers_per_gpu=4))
 optimizer = dict(
     type='AdamW', lr=0.0001, weight_decay=0, eps=1e-08, betas=(0.9, 0.999))
@@ -222,6 +222,6 @@ lr_config = dict(
     warmup_iters=500)
 oem_eval = dict(interval=500, save_best=True)
 interval = 1
-work_dir = 'work_dirs/exp5_obj_bnd'
+work_dir = 'work_dirs/exp7_bnd_unc'
 auto_resume = False
 gpu_ids = [0]

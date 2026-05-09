@@ -33,11 +33,12 @@ betas_cumprod = np.linspace(0.8, 0.0, T_MAX)
 # Ngưỡng tau_unc (Eq.6)
 TAU_UNC = 0.5
 
-# ─── ABLATION FLAGS (Bật/Tắt nhiễu) ──────────────────────────────────────────
-USE_OBJ = True   # Eq.7: Object-level deletion
-USE_BND = True   # Eq.8: Boundary dilation
-USE_UNC = True   # Eq.6: Uncertainty erosion
-# ──────────────────────────────────────────────────────────────────────────────
+# ─── ABLATION FLAGS ──────────────────────────────────────────────────────────
+# Bật/tắt từng thành phần đóng góp vào m_t cuối cùng:
+USE_M_OBJ      = True   # M_obj term trong Eq.11:  tau * M_obj
+USE_M_APPLIED  = True   # M_pixel_applied term:     (1-tau) * M_pixel_applied
+USE_MODIFY_BND = False   # Áp modify_boundary sau Eq.11 (nhiễu biên ngẫu nhiên)
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ─── ĐỌC DỮ LIỆU ─────────────────────────────────────────────────────────────
 img_bgr = cv2.imread(f"{DATA_ROOT}/{CITY}/images/{NAME}.tif")
@@ -80,78 +81,98 @@ def q_sample_vis(t):
     """
     beta_b = betas_cumprod[t]   # β̄_t
 
-    # ── Eq. 7: M_obj_t — Xóa/giữ object theo U_k^obj vs β_t ────────────────
-    # M_fine = gt (ground truth)
+    # ── Eq. 7: M_obj_t — luôn tính để visualize (Eq.7) ──────────────────────
     labeled   = measure.label(gt > 0.5)
-    M_obj = gt.copy()
-    if USE_OBJ:
-        labeled   = measure.label(gt > 0.5)
-        instances = [(labeled == i) for i in range(1, labeled.max() + 1)]
-        M_obj_new = np.zeros_like(gt)
-        if len(instances) > 0:
-            unc_scores = [unc[inst].mean() for inst in instances]
-            kept_any = False
-            for inst_mask, u_k in zip(instances, unc_scores):
-                if u_k <= beta_b:       # U_k^obj ≤ β_t → giữ lại
-                    M_obj_new[inst_mask] = 1.0
-                    kept_any = True
-            
-            # Fallback: Nếu xóa sạch thì giữ lại 1 cái tốt nhất để vis cho đẹp
-            if not kept_any:
-                best_idx = int(np.argmin(unc_scores))
-                M_obj_new[instances[best_idx]] = 1.0
-            M_obj = M_obj_new
+    instances = [(labeled == i) for i in range(1, labeled.max() + 1)]
+    M_obj = gt.copy()   # default: giữ nguyên GT (không xóa object nào)
+    if len(instances) > 0:
+        unc_scores = [unc[inst].mean() for inst in instances]
+        M_obj_new  = np.zeros_like(gt)
+        kept_any   = False
+        for inst_mask, u_k in zip(instances, unc_scores):
+            if u_k <= beta_b:            # U_k^obj ≤ β_t → giữ lại
+                M_obj_new[inst_mask] = 1.0
+                kept_any = True
+        if not kept_any:                 # fallback: giữ cái tốt nhất
+            M_obj_new[instances[int(np.argmin(unc_scores))]] = 1.0
+        M_obj = M_obj_new
 
-    # ── Eq. 8: M_bnd_t (Dilate Canny Edge chuẩn bài báo: n_iter = t) ──────
-    M_bnd = np.zeros_like(gt)
-    if USE_BND:
-        n_bnd = t   # t=0 -> 0 (sạch), t=5 -> 5 (bẩn)
-        if n_bnd > 0:
-            kernel_bnd = np.ones((3, 3), np.uint8)
-            M_bnd = cv2.dilate((edge > 0.5).astype(np.uint8), kernel_bnd, iterations=n_bnd).astype(np.float32)
-        else:
-            M_bnd = (edge > 0.5).astype(np.float32)
+    # ── Eq. 8: M_bnd_t — luôn tính để visualize ────────────────────────────
+    n_bnd = t
+    if n_bnd > 0:
+        kernel_bnd = np.ones((3, 3), np.uint8)
+        M_bnd = cv2.dilate((edge > 0.5).astype(np.uint8),
+                           kernel_bnd, iterations=n_bnd).astype(np.float32)
+    else:
+        M_bnd = (edge > 0.5).astype(np.float32)
 
-    # ── Eq. 6: M_unc_t (Erode vùng Uncertain theo T-t) ─────────────────────
-    M_unc = np.zeros_like(gt)
-    if USE_UNC:
-        unc_binary = (unc > TAU_UNC).astype(np.uint8)
-        n_erode = T_MAX - t
-        if n_erode > 0:
-            kernel_unc = np.ones((3, 3), np.uint8)
-            M_unc = cv2.erode(unc_binary, kernel_unc, iterations=n_erode).astype(np.float32)
-        else:
-            M_unc = unc_binary.astype(np.float32)
+    # ── Eq. 6: M_unc_t — luôn tính để visualize ────────────────────────────
+    unc_binary = (unc > TAU_UNC).astype(np.uint8)
+    n_erode = T_MAX - t
+    if n_erode > 0 and unc_binary.sum() > 0:
+        kernel_unc = np.ones((3, 3), np.uint8)
+        M_unc = cv2.erode(unc_binary, kernel_unc,
+                          iterations=n_erode).astype(np.float32)
+    else:
+        M_unc = unc_binary.astype(np.float32)
 
-    # ── Eq. 9: M_sp_t = M_bnd_t ∪ M_unc_t ───────────────────────────────────
-    M_sp = ((M_bnd > 0.5) | (M_unc > 0.5)).astype(np.float32)
-
-    # ── Eq. 10: M_pixel_applied = M_sp & GT (AND) ───────────────────────────
-    # 0,0→0  0,1→0  1,0→0  1,1→1
+    # ── Eq. 9-10: M_sp, M_pixel_applied — luôn tính ─────────────────────────
+    M_sp            = ((M_bnd > 0.5) | (M_unc > 0.5)).astype(np.float32)
     M_pixel_applied = (M_sp * gt).astype(np.float32)
 
-    # ── Eq. 11: m_t = τ·M_obj_t + (1−τ)·M_pixel_applied_t ────────────
+    # ── Eq. 11: m_t — gate theo ablation flags ───────────────────────────────
     tau = (np.random.rand(*gt.shape) < beta_b).astype(np.float32)
-    m_t = tau * M_obj + (1 - tau) * M_pixel_applied
+    m_obj_term     = M_obj     if USE_M_OBJ     else np.zeros_like(gt)
+    m_applied_term = M_pixel_applied if USE_M_APPLIED else np.zeros_like(gt)
+    m_t = tau * m_obj_term + (1 - tau) * m_applied_term
 
-    # ── Sau Eq.11: áp modify_boundary (nhiễu biên nguyên gốc SegRefiner) ──────
+    # ── modify_boundary — scale theo timestep, gate theo USE_MODIFY_BND ──────
+    # t=0 (sạch, β=0.8): nhẹ  → iou_target=0.90, rates=0.05
+    # t=5 (bẩn, β=0.0): mạnh → iou_target=0.70, rates=0.20
+    noise_level = t / max(T_MAX - 1, 1)               # 0.0 … 1.0
+    mb_regional = 0.05 + 0.15 * noise_level
+    mb_sample   = 0.05 + 0.15 * noise_level
+    mb_iou      = 0.90 - 0.20 * noise_level
+    m_t_before_mb = (m_t >= 0.5).astype(np.float32)   # Eq.11 output trước modify_bnd
     m_t_uint8 = (m_t >= 0.5).astype(np.uint8) * 255
-    m_t_mb    = modify_boundary(m_t_uint8)          # trả về binary {0,1}
+    if USE_MODIFY_BND and m_t_uint8.sum() > 0:
+        m_t_mb = modify_boundary(m_t_uint8,
+                                 regional_sample_rate=mb_regional,
+                                 sample_rate=mb_sample,
+                                 iou_target=mb_iou)
+    else:
+        m_t_mb = (m_t_uint8 / 255).astype(np.uint8)   # không áp / mask rỗng
 
-    return m_t_mb.astype(np.float32), M_obj, M_bnd, M_unc, M_sp
+    M_pixel_applied_vis = M_pixel_applied.astype(np.float32)
+    return (m_t_mb.astype(np.float32), M_obj, M_pixel_applied_vis,
+            m_t_before_mb, M_sp, mb_regional, mb_iou)
 
 # ─── VISUALIZE ───────────────────────────────────────────────────────────────
 STEPS = list(range(T_MAX))   # t = 0, 1, 2, 3, 4, 5
-n_cols = 7   # coarse | overlay | diff | M_obj | M_bnd | M_unc | GT
-fig, axes = plt.subplots(len(STEPS), n_cols, figsize=(26, 3.5 * len(STEPS)))
+n_cols = 7   # m_t_final | overlay | error | M_obj | M_pixel_applied | m_t_pre_mb | GT
+fig, axes = plt.subplots(len(STEPS), n_cols, figsize=(28, 4.0 * len(STEPS)))
 fig.patch.set_facecolor('#0d1117')
+fig.suptitle(
+    f"Q-Sample  |  {NAME}  |  T={T_MAX}  |  "
+    f"M_obj={USE_M_OBJ}  M_applied={USE_M_APPLIED}  modify_bnd={USE_MODIFY_BND}",
+    color='#e6edf3', fontsize=13, fontweight='bold', y=1.01
+)
 
-col_titles = ['m_t (coarse)', 'Overlay', 'FP/FN', 'M_obj_t', 'M_bnd_t', 'M_unc_t', 'GT']
+col_titles = [
+    '① m_t  (final)\nEq.11 → modify_bnd',
+    '② RGB overlay\nred = noisy foreground',
+    '③ Error map\nwhite=TP · red=FP · blue=FN',
+    '④ M_obj_t\nEq.7: object dropout',
+    '⑤ M_pixel_applied\nEq.10: (M_bnd∪M_unc) ∩ GT',
+    '⑥ m_t  before modify_bnd\nraw Eq.11 output',
+    '⑦ GT mask\nground truth',
+]
 for c, ttl in enumerate(col_titles):
-    axes[0, c].set_title(ttl, color='#58a6ff', fontsize=10, fontweight='bold')
+    axes[0, c].set_title(ttl, color='#58a6ff', fontsize=9, fontweight='bold',
+                         linespacing=1.5)
 
 for i, t in enumerate(STEPS):
-    coarse, M_obj, M_bnd, M_unc, M_sp = q_sample_vis(t)
+    coarse, M_obj, M_pixel_applied, m_t_before, M_sp, mb_regional, mb_iou = q_sample_vis(t)
     beta_b = betas_cumprod[t]
 
     # Overlay RGB + coarse (đỏ = foreground trong coarse)
@@ -164,11 +185,12 @@ for i, t in enumerate(STEPS):
     diff[(coarse == 1) & (gt == 0)] = [1.0, 0.0, 0.0]   # FP
     diff[(coarse == 0) & (gt == 1)] = [0.0, 0.5, 1.0]   # FN
 
-    row_label = f"t={t}  β̄={beta_b:.2f}  n_bnd={t}  n_unc={T_MAX-t}"
-    axes[i, 0].set_ylabel(row_label, color='#e6edf3', fontsize=8, rotation=0,
+    row_label = (f"t={t}  β̄={beta_b:.2f}\n"
+                 f"mb_rate={mb_regional:.2f}  iou_tgt={mb_iou:.2f}")
+    axes[i, 0].set_ylabel(row_label, color='#e6edf3', fontsize=7.5, rotation=0,
                           labelpad=110, va='center')
 
-    for c, img_data in enumerate([coarse, overlay/255.0, diff, M_obj, M_bnd, M_unc, gt]):
+    for c, img_data in enumerate([coarse, overlay/255.0, diff, M_obj, M_pixel_applied, m_t_before, gt]):
         cmap = 'gray' if c in [0, 3, 4, 5, 6] else None
         axes[i, c].imshow(img_data, cmap=cmap, vmin=0, vmax=1)
         axes[i, c].axis('off')

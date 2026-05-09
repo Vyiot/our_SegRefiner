@@ -52,11 +52,11 @@ class SegRefiner(BaseModule):
         
         self.betas = self.betas_cumprod / self.betas_cumprod_prev
         self.num_timesteps = self.betas_cumprod.shape[0]
-        # [NEW] Đọc cấu hình các thành phần nhiễu (Ablation Study)
+        # [ABLATION] Flags kiểm soát đóng góp vào m_t cuối
         noise_cfg = diffusion_cfg.get('noise_components', {})
-        self.use_obj = noise_cfg.get('use_obj', False)
-        self.use_bnd = noise_cfg.get('use_bnd', False)
-        self.use_unc = noise_cfg.get('use_unc', False)
+        self.use_m_obj      = noise_cfg.get('use_m_obj',      False)
+        self.use_m_unc  = noise_cfg.get('use_m_unc',  False)
+        self.use_modify_bnd = noise_cfg.get('use_modify_bnd', False)
     
     def forward(self, img_metas, return_loss=True, **kwargs):
         """Calls either :func:`forward_train` or :func:`forward_test` depending

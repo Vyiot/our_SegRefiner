@@ -1,0 +1,2178 @@
+2026-05-08 12:39:26,497 - mmdet - INFO - Environment info:
+------------------------------------------------------------
+sys.platform: linux
+Python: 3.8.20 (default, Oct  3 2024, 15:24:27) [GCC 11.2.0]
+CUDA available: True
+GPU 0: NVIDIA L40S
+CUDA_HOME: /usr
+NVCC: Cuda compilation tools, release 12.0, V12.0.140
+GCC: gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+PyTorch: 1.10.1+cu111
+PyTorch compiling details: PyTorch built with:
+  - GCC 7.3
+  - C++ Version: 201402
+  - Intel(R) Math Kernel Library Version 2020.0.0 Product Build 20191122 for Intel(R) 64 architecture applications
+  - Intel(R) MKL-DNN v2.2.3 (Git Hash 7336ca9f055cf1bfa13efb658fe15dc9b41f0740)
+  - OpenMP 201511 (a.k.a. OpenMP 4.5)
+  - LAPACK is enabled (usually provided by MKL)
+  - NNPACK is enabled
+  - CPU capability usage: AVX2
+  - CUDA Runtime 11.1
+  - NVCC architecture flags: -gencode;arch=compute_37,code=sm_37;-gencode;arch=compute_50,code=sm_50;-gencode;arch=compute_60,code=sm_60;-gencode;arch=compute_70,code=sm_70;-gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86
+  - CuDNN 8.0.5
+  - Magma 2.5.2
+  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, CUDA_VERSION=11.1, CUDNN_VERSION=8.0.5, CXX_COMPILER=/opt/rh/devtoolset-7/root/usr/bin/c++, CXX_FLAGS= -Wno-deprecated -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -fopenmp -DNDEBUG -DUSE_KINETO -DUSE_FBGEMM -DUSE_QNNPACK -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -DEDGE_PROFILER_USE_KINETO -O2 -fPIC -Wno-narrowing -Wall -Wextra -Werror=return-type -Wno-missing-field-initializers -Wno-type-limits -Wno-array-bounds -Wno-unknown-pragmas -Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-result -Wno-unused-local-typedefs -Wno-strict-overflow -Wno-strict-aliasing -Wno-error=deprecated-declarations -Wno-stringop-overflow -Wno-psabi -Wno-error=pedantic -Wno-error=redundant-decls -Wno-error=old-style-cast -fdiagnostics-color=always -faligned-new -Wno-unused-but-set-variable -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, PERF_WITH_AVX512=1, TORCH_VERSION=1.10.1, USE_CUDA=ON, USE_CUDNN=ON, USE_EXCEPTION_PTR=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=ON, USE_NNPACK=ON, USE_OPENMP=ON, 
+
+TorchVision: 0.11.2+cu111
+OpenCV: 4.13.0
+MMCV: 1.5.0
+MMCV Compiler: GCC 7.3
+MMCV CUDA Compiler: 11.1
+MMDetection: 2.28.1+bbdbfed
+------------------------------------------------------------
+
+2026-05-08 12:39:27,067 - mmdet - INFO - Distributed training: False
+2026-05-08 12:39:27,687 - mmdet - INFO - Config:
+checkpoint_config = dict(interval=0, by_epoch=False)
+log_config = dict(
+    interval=25, hooks=[dict(type='TextLoggerHook', by_epoch=False)])
+dist_params = dict(backend='nccl')
+log_level = 'INFO'
+load_from = None
+resume_from = 'work_dirs/exp8_all/latest.pth'
+workflow = [('train', 1)]
+opencv_num_threads = 0
+mp_start_method = 'spawn'
+auto_scale_lr = dict(enable=False, base_batch_size=16)
+object_size = 256
+task = 'semantic'
+model = dict(
+    type='SegRefinerSemantic',
+    task='semantic',
+    step=6,
+    denoise_model=dict(
+        type='DenoiseUNet',
+        in_channels=4,
+        out_channels=1,
+        model_channels=128,
+        num_res_blocks=2,
+        num_heads=4,
+        num_heads_upsample=-1,
+        attention_strides=(16, 32),
+        learn_time_embd=True,
+        num_timesteps=6,
+        channel_mult=(1, 1, 2, 2, 4, 4),
+        dropout=0.0),
+    diffusion_cfg=dict(
+        betas=dict(type='linear', start=0.8, stop=0.0, num_timesteps=6),
+        diff_iter=False,
+        noise_components=dict(use_obj=True, use_bnd=True, use_unc=True)),
+    test_cfg=dict(
+        model_size=1024,
+        fine_prob_thr=0.8,
+        batch_max=32,
+        iou_thr=0.15,
+        max_local_patches=16,
+        nms_iou_thr=0.5))
+img_norm_cfg = dict(
+    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(
+        type='LoadAnnotations',
+        with_bbox=False,
+        with_label=False,
+        with_mask=False,
+        with_seg=True),
+    dict(
+        type='LoadOEMCoarseMasks',
+        use_obj=False,
+        use_bnd=False,
+        use_unc=False,
+        obj_unc_threshold=0.3,
+        test_mode=False),
+    dict(type='AddGlobalView', size=256),
+    dict(type='RandomCropAll', crop_size=256),
+    dict(type='RandomFlip', flip_ratio=0.5),
+    dict(
+        type='Normalize',
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375],
+        to_rgb=True),
+    dict(type='DefaultFormatBundle'),
+    dict(
+        type='Collect',
+        keys=[
+            'img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map',
+            'global_img', 'global_gt_np', 'global_coarse_np', 'global_unc_np',
+            'global_edge_np'
+        ])
+]
+val_data_root = '/home/ubuntu/vy/Denoiser/OEM_v2_Building'
+val_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(
+        type='LoadAnnotations',
+        with_bbox=False,
+        with_label=False,
+        with_mask=False,
+        with_seg=True),
+    dict(
+        type='LoadOEMCoarseMasks',
+        test_mode=True,
+        pseudolabel_dir='/home/ubuntu/vy/Denoiser/OEM_v2_Building/pseudolabels'
+    ),
+    dict(type='Resize', img_scale=(1024, 1024), keep_ratio=False),
+    dict(
+        type='Normalize',
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375],
+        to_rgb=True),
+    dict(type='DefaultFormatBundle'),
+    dict(
+        type='Collect',
+        keys=['img', 'gt_masks', 'coarse_masks'],
+        meta_keys=[
+            'filename', 'ori_filename', 'ori_shape', 'img_shape', 'pad_shape',
+            'scale_factor', 'flip', 'flip_direction', 'img_norm_cfg',
+            'crop_bbox'
+        ])
+]
+data_root = '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'
+dataset_type = 'OEMBuildingDataset'
+data = dict(
+    train=dict(
+        type='OEMBuildingDataset',
+        data_root='/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD',
+        split_file='/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD/train.txt',
+        pipeline=[
+            dict(type='LoadImageFromFile'),
+            dict(
+                type='LoadAnnotations',
+                with_bbox=False,
+                with_label=False,
+                with_mask=False,
+                with_seg=True),
+            dict(
+                type='LoadOEMCoarseMasks',
+                use_obj=True,
+                use_bnd=True,
+                use_unc=True,
+                test_mode=False),
+            dict(type='AddGlobalView', size=256),
+            dict(type='RandomCropAll', crop_size=256),
+            dict(type='RandomFlip', flip_ratio=0.5),
+            dict(
+                type='Normalize',
+                mean=[123.675, 116.28, 103.53],
+                std=[58.395, 57.12, 57.375],
+                to_rgb=True),
+            dict(type='DefaultFormatBundle'),
+            dict(
+                type='Collect',
+                keys=[
+                    'img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map',
+                    'global_img', 'global_gt_np', 'global_coarse_np',
+                    'global_unc_np', 'global_edge_np'
+                ])
+        ],
+        test_mode=False),
+    val=dict(
+        type='OEMv2BuildingDataset',
+        data_root='/home/ubuntu/vy/Denoiser/OEM_v2_Building',
+        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/val_hard.txt',
+        pipeline=[
+            dict(type='LoadImageFromFile'),
+            dict(
+                type='LoadAnnotations',
+                with_bbox=False,
+                with_label=False,
+                with_mask=False,
+                with_seg=True),
+            dict(
+                type='LoadOEMCoarseMasks',
+                test_mode=True,
+                pseudolabel_dir=
+                '/home/ubuntu/vy/Denoiser/OEM_v2_Building/pseudolabels'),
+            dict(type='Resize', img_scale=(1024, 1024), keep_ratio=False),
+            dict(
+                type='Normalize',
+                mean=[123.675, 116.28, 103.53],
+                std=[58.395, 57.12, 57.375],
+                to_rgb=True),
+            dict(type='DefaultFormatBundle'),
+            dict(
+                type='Collect',
+                keys=['img', 'gt_masks', 'coarse_masks'],
+                meta_keys=[
+                    'filename', 'ori_filename', 'ori_shape', 'img_shape',
+                    'pad_shape', 'scale_factor', 'flip', 'flip_direction',
+                    'img_norm_cfg', 'crop_bbox'
+                ])
+        ],
+        test_mode=True),
+    test=dict(
+        type='OEMv2BuildingDataset',
+        data_root='/home/ubuntu/vy/Denoiser/OEM_v2_Building',
+        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/test.txt',
+        pipeline=[
+            dict(type='LoadImageFromFile'),
+            dict(
+                type='LoadAnnotations',
+                with_bbox=False,
+                with_label=False,
+                with_mask=False,
+                with_seg=True),
+            dict(
+                type='LoadOEMCoarseMasks',
+                test_mode=True,
+                pseudolabel_dir=
+                '/home/ubuntu/vy/Denoiser/OEM_v2_Building/pseudolabels'),
+            dict(type='Resize', img_scale=(1024, 1024), keep_ratio=False),
+            dict(
+                type='Normalize',
+                mean=[123.675, 116.28, 103.53],
+                std=[58.395, 57.12, 57.375],
+                to_rgb=True),
+            dict(type='DefaultFormatBundle'),
+            dict(
+                type='Collect',
+                keys=['img', 'gt_masks', 'coarse_masks'],
+                meta_keys=[
+                    'filename', 'ori_filename', 'ori_shape', 'img_shape',
+                    'pad_shape', 'scale_factor', 'flip', 'flip_direction',
+                    'img_norm_cfg', 'crop_bbox'
+                ])
+        ],
+        test_mode=True),
+    train_dataloader=dict(samples_per_gpu=16, workers_per_gpu=4),
+    val_dataloader=dict(samples_per_gpu=1, workers_per_gpu=4))
+optimizer = dict(
+    type='AdamW', lr=0.0001, weight_decay=0, eps=1e-08, betas=(0.9, 0.999))
+optimizer_config = dict(grad_clip=None)
+max_iters = 120000
+runner = dict(type='IterBasedRunner', max_iters=120000)
+lr_config = dict(
+    policy='step',
+    gamma=0.5,
+    by_epoch=False,
+    step=[85000, 110000],
+    warmup='linear',
+    warmup_by_epoch=False,
+    warmup_ratio=0.001,
+    warmup_iters=500)
+oem_eval = dict(interval=500, num_images=10, save_best=True)
+interval = 1
+work_dir = 'work_dirs/exp8_all'
+auto_resume = False
+gpu_ids = [0]
+
+2026-05-08 12:39:27,688 - mmdet - INFO - Set random seed to 231377576, deterministic: False
+Name of parameter - Initialization information
+
+denoise_model.time_embed.weight - torch.Size([6, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.0.0.weight - torch.Size([128, 4, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.0.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.in_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.in_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.in_layers.2.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.1.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.in_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.in_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.in_layers.2.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.2.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.3.0.op.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.3.0.op.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.in_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.in_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.in_layers.2.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.4.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.in_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.in_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.in_layers.2.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.5.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.6.0.op.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.6.0.op.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.in_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.in_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.in_layers.2.weight - torch.Size([256, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.skip_connection.weight - torch.Size([256, 128, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.7.0.skip_connection.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.in_layers.2.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.8.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.9.0.op.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.9.0.op.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.in_layers.2.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.10.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.in_layers.2.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.11.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.12.0.op.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.12.0.op.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.in_layers.2.weight - torch.Size([512, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.skip_connection.weight - torch.Size([512, 256, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.0.skip_connection.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.13.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.in_layers.2.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.14.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.15.0.op.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.15.0.op.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.in_layers.2.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.16.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.in_layers.2.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.input_blocks.17.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.in_layers.2.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.in_layers.2.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.middle_block.2.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.in_layers.0.weight - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.in_layers.0.bias - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.in_layers.2.weight - torch.Size([512, 1024, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.skip_connection.weight - torch.Size([512, 1024, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.0.skip_connection.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.0.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.in_layers.0.weight - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.in_layers.0.bias - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.in_layers.2.weight - torch.Size([512, 1024, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.skip_connection.weight - torch.Size([512, 1024, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.0.skip_connection.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.1.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.in_layers.0.weight - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.in_layers.0.bias - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.in_layers.2.weight - torch.Size([512, 1024, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.skip_connection.weight - torch.Size([512, 1024, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.0.skip_connection.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.2.conv.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.2.2.conv.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.in_layers.0.weight - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.in_layers.0.bias - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.in_layers.2.weight - torch.Size([512, 1024, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.skip_connection.weight - torch.Size([512, 1024, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.0.skip_connection.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.3.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.in_layers.0.weight - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.in_layers.0.bias - torch.Size([1024]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.in_layers.2.weight - torch.Size([512, 1024, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.skip_connection.weight - torch.Size([512, 1024, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.0.skip_connection.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.4.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.in_layers.0.weight - torch.Size([768]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.in_layers.0.bias - torch.Size([768]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.in_layers.2.weight - torch.Size([512, 768, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.in_layers.2.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.emb_layers.1.weight - torch.Size([512, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.emb_layers.1.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.out_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.out_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.out_layers.3.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.out_layers.3.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.skip_connection.weight - torch.Size([512, 768, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.0.skip_connection.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.1.norm.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.1.norm.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.1.qkv.weight - torch.Size([1536, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.1.qkv.bias - torch.Size([1536]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.1.proj_out.weight - torch.Size([512, 512, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.1.proj_out.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.2.conv.weight - torch.Size([512, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.5.2.conv.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.in_layers.0.weight - torch.Size([768]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.in_layers.0.bias - torch.Size([768]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.in_layers.2.weight - torch.Size([256, 768, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.skip_connection.weight - torch.Size([256, 768, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.6.0.skip_connection.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.in_layers.2.weight - torch.Size([256, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.skip_connection.weight - torch.Size([256, 512, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.7.0.skip_connection.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.in_layers.2.weight - torch.Size([256, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.skip_connection.weight - torch.Size([256, 512, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.0.skip_connection.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.1.conv.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.8.1.conv.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.in_layers.2.weight - torch.Size([256, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.skip_connection.weight - torch.Size([256, 512, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.9.0.skip_connection.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.in_layers.0.weight - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.in_layers.0.bias - torch.Size([512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.in_layers.2.weight - torch.Size([256, 512, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.skip_connection.weight - torch.Size([256, 512, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.10.0.skip_connection.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.in_layers.0.weight - torch.Size([384]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.in_layers.0.bias - torch.Size([384]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.in_layers.2.weight - torch.Size([256, 384, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.in_layers.2.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.emb_layers.1.weight - torch.Size([256, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.emb_layers.1.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.out_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.out_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.out_layers.3.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.out_layers.3.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.skip_connection.weight - torch.Size([256, 384, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.0.skip_connection.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.1.conv.weight - torch.Size([256, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.11.1.conv.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.in_layers.0.weight - torch.Size([384]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.in_layers.0.bias - torch.Size([384]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.in_layers.2.weight - torch.Size([128, 384, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.skip_connection.weight - torch.Size([128, 384, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.12.0.skip_connection.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.in_layers.2.weight - torch.Size([128, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.skip_connection.weight - torch.Size([128, 256, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.13.0.skip_connection.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.in_layers.2.weight - torch.Size([128, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.skip_connection.weight - torch.Size([128, 256, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.0.skip_connection.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.1.conv.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.14.1.conv.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.in_layers.2.weight - torch.Size([128, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.skip_connection.weight - torch.Size([128, 256, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.15.0.skip_connection.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.in_layers.2.weight - torch.Size([128, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.skip_connection.weight - torch.Size([128, 256, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.16.0.skip_connection.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.in_layers.0.weight - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.in_layers.0.bias - torch.Size([256]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.in_layers.2.weight - torch.Size([128, 256, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.in_layers.2.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.emb_layers.1.weight - torch.Size([128, 512]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.emb_layers.1.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.out_layers.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.out_layers.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.out_layers.3.weight - torch.Size([128, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.out_layers.3.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.skip_connection.weight - torch.Size([128, 256, 1, 1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.output_blocks.17.0.skip_connection.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.out.0.weight - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.out.0.bias - torch.Size([128]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.out.2.weight - torch.Size([1, 128, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+denoise_model.out.2.bias - torch.Size([1]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+loss_texture.sobel.conv_x.weight - torch.Size([1, 1, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+
+loss_texture.sobel.conv_y.weight - torch.Size([1, 1, 3, 3]): 
+The value is the same before and after calling `init_weights` of SegRefinerSemantic  
+2026-05-08 12:39:32,815 - mmdet - INFO - Automatic scaling of learning rate (LR) has been disabled.
+2026-05-08 12:39:32,818 - mmdet - INFO - load checkpoint from local path: work_dirs/exp8_all/latest.pth
+2026-05-08 12:39:32,967 - mmdet - INFO - resumed from epoch: 1, iter 24999
+2026-05-08 12:39:32,968 - mmdet - INFO - Start running, host: ubuntu@ip-172-31-22-110, work_dir: /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all
+2026-05-08 12:39:32,968 - mmdet - INFO - Hooks will be executed in the following order:
+before_run:
+(VERY_HIGH   ) StepLrUpdaterHook                  
+(NORMAL      ) CheckpointHook                     
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_train_epoch:
+(VERY_HIGH   ) StepLrUpdaterHook                  
+(LOW         ) IterTimerHook                      
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_train_iter:
+(VERY_HIGH   ) StepLrUpdaterHook                  
+(LOW         ) IterTimerHook                      
+ -------------------- 
+after_train_iter:
+(ABOVE_NORMAL) OptimizerHook                      
+(NORMAL      ) CheckpointHook                     
+(LOW         ) IterTimerHook                      
+(LOW         ) OEMBuildingEvalHook                
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+after_train_epoch:
+(NORMAL      ) CheckpointHook                     
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_val_epoch:
+(LOW         ) IterTimerHook                      
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+before_val_iter:
+(LOW         ) IterTimerHook                      
+ -------------------- 
+after_val_iter:
+(LOW         ) IterTimerHook                      
+ -------------------- 
+after_val_epoch:
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+after_run:
+(VERY_LOW    ) TextLoggerHook                     
+ -------------------- 
+2026-05-08 12:39:32,968 - mmdet - INFO - workflow: [('train', 1)], max: 120000 iters
+2026-05-08 12:39:32,968 - mmdet - INFO - Checkpoints will be saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all by HardDiskBackend.
+2026-05-08 12:39:44,194 - mmdet - INFO - Validation set: 10 images
+2026-05-08 12:39:44,194 - mmdet - INFO - 
+--- Val evaluation at iter 25000 ---
+2026-05-08 12:41:02,822 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 81.07       | 93.28       |
+| building   | 35.60       | 59.08       |
+| Summary    | mIoU: 58.34 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 12:41:04,862 - mmdet - INFO - ★ New best mIoU: 58.34% (prev: 0.00%, Δ=+58.34%) → saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/best_model.pth
+2026-05-08 12:41:04,866 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 12:41:04,867 - mmdet - INFO - Iter [25000/120000]	lr: 1.000e-04, eta: 80 days, 8:50:31, time: 2.924, data_time: 1.405, memory: 35735, val/mIoU: 0.5834, val/IoU.building: 0.3560, val/IoU.background: 0.8107, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0985, loss_texture: 0.0184, iou: 0.6103, iou_t0: 0.4609, iou_t1: 0.4637, iou_t2: 0.5562, iou_t3: 0.6476, iou_t4: 0.6103, iou_t5: 0.9117, loss: 0.1169
+2026-05-08 12:41:38,976 - mmdet - INFO - Iter [25025/120000]	lr: 1.000e-04, eta: 7 days, 22:38:01, time: 4.591, data_time: 3.245, memory: 37118, loss_mask: 0.0990, loss_texture: 0.0194, iou: 0.6115, iou_t0: 0.5490, iou_t1: 0.6149, iou_t2: 0.6131, iou_t3: 0.6398, iou_t4: 0.6875, iou_t5: 0.6132, loss: 0.1184
+2026-05-08 12:42:13,853 - mmdet - INFO - Iter [25050/120000]	lr: 1.000e-04, eta: 4 days, 19:11:49, time: 1.395, data_time: 0.019, memory: 37118, loss_mask: 0.0989, loss_texture: 0.0192, iou: 0.6157, iou_t0: 0.6162, iou_t1: 0.5850, iou_t2: 0.5962, iou_t3: 0.6781, iou_t4: 0.5835, iou_t5: 0.5859, loss: 0.1181
+2026-05-08 12:42:48,060 - mmdet - INFO - Iter [25075/120000]	lr: 1.000e-04, eta: 3 days, 17:09:03, time: 1.368, data_time: 0.019, memory: 37118, loss_mask: 0.1000, loss_texture: 0.0192, iou: 0.6029, iou_t0: 0.5609, iou_t1: 0.5462, iou_t2: 0.6445, iou_t3: 0.6315, iou_t4: 0.5459, iou_t5: 0.5546, loss: 0.1192
+2026-05-08 12:43:22,479 - mmdet - INFO - Iter [25100/120000]	lr: 1.000e-04, eta: 3 days, 4:02:58, time: 1.377, data_time: 0.019, memory: 37118, loss_mask: 0.0989, loss_texture: 0.0189, iou: 0.5956, iou_t0: 0.5507, iou_t1: 0.6209, iou_t2: 0.6238, iou_t3: 0.5467, iou_t4: 0.6191, iou_t5: 0.5565, loss: 0.1178
+2026-05-08 12:43:56,486 - mmdet - INFO - Iter [25125/120000]	lr: 1.000e-04, eta: 2 days, 20:03:26, time: 1.360, data_time: 0.019, memory: 37118, loss_mask: 0.0935, loss_texture: 0.0188, iou: 0.6030, iou_t0: 0.5561, iou_t1: 0.5808, iou_t2: 0.5878, iou_t3: 0.5706, iou_t4: 0.6637, iou_t5: 0.6251, loss: 0.1123
+2026-05-08 12:44:31,282 - mmdet - INFO - Iter [25150/120000]	lr: 1.000e-04, eta: 2 days, 14:50:45, time: 1.392, data_time: 0.019, memory: 37118, loss_mask: 0.0976, loss_texture: 0.0195, iou: 0.6272, iou_t0: 0.6853, iou_t1: 0.5511, iou_t2: 0.7949, iou_t3: 0.5680, iou_t4: 0.5604, iou_t5: 0.6615, loss: 0.1171
+2026-05-08 12:45:05,315 - mmdet - INFO - Iter [25175/120000]	lr: 1.000e-04, eta: 2 days, 10:59:53, time: 1.361, data_time: 0.018, memory: 37118, loss_mask: 0.0983, loss_texture: 0.0191, iou: 0.6287, iou_t0: 0.6182, iou_t1: 0.6532, iou_t2: 0.6625, iou_t3: 0.5853, iou_t4: 0.6098, iou_t5: 0.6206, loss: 0.1174
+2026-05-08 12:45:39,555 - mmdet - INFO - Iter [25200/120000]	lr: 1.000e-04, eta: 2 days, 8:07:55, time: 1.370, data_time: 0.019, memory: 37118, loss_mask: 0.1068, loss_texture: 0.0204, iou: 0.6343, iou_t0: 0.6124, iou_t1: 0.6557, iou_t2: 0.6007, iou_t3: 0.6418, iou_t4: 0.6807, iou_t5: 0.6310, loss: 0.1272
+2026-05-08 12:46:13,829 - mmdet - INFO - Iter [25225/120000]	lr: 1.000e-04, eta: 2 days, 5:54:08, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.0991, loss_texture: 0.0193, iou: 0.6111, iou_t0: 0.6286, iou_t1: 0.6797, iou_t2: 0.6389, iou_t3: 0.5219, iou_t4: 0.6219, iou_t5: 0.5865, loss: 0.1184
+2026-05-08 12:46:47,368 - mmdet - INFO - Iter [25250/120000]	lr: 1.000e-04, eta: 2 days, 4:02:15, time: 1.342, data_time: 0.019, memory: 37118, loss_mask: 0.0981, loss_texture: 0.0186, iou: 0.6133, iou_t0: 0.6347, iou_t1: 0.5631, iou_t2: 0.5073, iou_t3: 0.5877, iou_t4: 0.6876, iou_t5: 0.5881, loss: 0.1168
+2026-05-08 12:47:21,802 - mmdet - INFO - Iter [25275/120000]	lr: 1.000e-04, eta: 2 days, 2:35:39, time: 1.377, data_time: 0.019, memory: 37118, loss_mask: 0.0969, loss_texture: 0.0186, iou: 0.6312, iou_t0: 0.6291, iou_t1: 0.6819, iou_t2: 0.6420, iou_t3: 0.5644, iou_t4: 0.6158, iou_t5: 0.6715, loss: 0.1155
+2026-05-08 12:47:56,449 - mmdet - INFO - Iter [25300/120000]	lr: 1.000e-04, eta: 2 days, 1:24:28, time: 1.386, data_time: 0.019, memory: 37118, loss_mask: 0.1087, loss_texture: 0.0203, iou: 0.6054, iou_t0: 0.6719, iou_t1: 0.6331, iou_t2: 0.6241, iou_t3: 0.6327, iou_t4: 0.5310, iou_t5: 0.5146, loss: 0.1290
+2026-05-08 12:48:30,553 - mmdet - INFO - Iter [25325/120000]	lr: 1.000e-04, eta: 2 days, 0:21:28, time: 1.364, data_time: 0.020, memory: 37118, loss_mask: 0.0943, loss_texture: 0.0189, iou: 0.5988, iou_t0: 0.5821, iou_t1: 0.5353, iou_t2: 0.6883, iou_t3: 0.6145, iou_t4: 0.6433, iou_t5: 0.5543, loss: 0.1132
+2026-05-08 12:49:04,819 - mmdet - INFO - Iter [25350/120000]	lr: 1.000e-04, eta: 1 day, 23:28:06, time: 1.371, data_time: 0.019, memory: 37118, loss_mask: 0.1005, loss_texture: 0.0190, iou: 0.6199, iou_t0: 0.5634, iou_t1: 0.6772, iou_t2: 0.6714, iou_t3: 0.5844, iou_t4: 0.6269, iou_t5: 0.6285, loss: 0.1195
+2026-05-08 12:49:39,056 - mmdet - INFO - Iter [25375/120000]	lr: 1.000e-04, eta: 1 day, 22:41:38, time: 1.369, data_time: 0.019, memory: 37118, loss_mask: 0.0916, loss_texture: 0.0185, iou: 0.6078, iou_t0: 0.6393, iou_t1: 0.5966, iou_t2: 0.6325, iou_t3: 0.5936, iou_t4: 0.6074, iou_t5: 0.5836, loss: 0.1101
+2026-05-08 12:50:13,725 - mmdet - INFO - Iter [25400/120000]	lr: 1.000e-04, eta: 1 day, 22:02:35, time: 1.387, data_time: 0.019, memory: 37118, loss_mask: 0.1075, loss_texture: 0.0205, iou: 0.6357, iou_t0: 0.6951, iou_t1: 0.6229, iou_t2: 0.6174, iou_t3: 0.6067, iou_t4: 0.6549, iou_t5: 0.6166, loss: 0.1280
+2026-05-08 12:50:48,209 - mmdet - INFO - Iter [25425/120000]	lr: 1.000e-04, eta: 1 day, 21:27:22, time: 1.379, data_time: 0.020, memory: 37118, loss_mask: 0.0944, loss_texture: 0.0184, iou: 0.6272, iou_t0: 0.6749, iou_t1: 0.6475, iou_t2: 0.6645, iou_t3: 0.5969, iou_t4: 0.5858, iou_t5: 0.6190, loss: 0.1129
+2026-05-08 12:51:22,297 - mmdet - INFO - Iter [25450/120000]	lr: 1.000e-04, eta: 1 day, 20:54:36, time: 1.364, data_time: 0.019, memory: 37118, loss_mask: 0.0960, loss_texture: 0.0195, iou: 0.6027, iou_t0: 0.6678, iou_t1: 0.5448, iou_t2: 0.6051, iou_t3: 0.6374, iou_t4: 0.5746, iou_t5: 0.4550, loss: 0.1155
+2026-05-08 12:51:57,191 - mmdet - INFO - Iter [25475/120000]	lr: 1.000e-04, eta: 1 day, 20:27:54, time: 1.396, data_time: 0.019, memory: 37118, loss_mask: 0.1096, loss_texture: 0.0218, iou: 0.6101, iou_t0: 0.5693, iou_t1: 0.7056, iou_t2: 0.5275, iou_t3: 0.5677, iou_t4: 0.6002, iou_t5: 0.6436, loss: 0.1314
+2026-05-08 12:52:31,380 - mmdet - INFO - 
+--- Val evaluation at iter 25500 ---
+2026-05-08 12:53:48,828 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 88.66       | 93.28       |
+| building   | 47.57       | 59.08       |
+| Summary    | mIoU: 68.12 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 12:53:51,779 - mmdet - INFO - ★ New best mIoU: 68.12% (prev: 58.34%, Δ=+9.78%) → saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/best_model.pth
+2026-05-08 12:53:51,783 - mmdet - INFO - Iter [25500/120000]	lr: 1.000e-04, eta: 1 day, 20:01:35, time: 1.368, data_time: 0.019, memory: 37118, val/mIoU: 0.6812, val/IoU.building: 0.4757, val/IoU.background: 0.8866, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0927, loss_texture: 0.0185, iou: 0.5892, iou_t0: 0.5804, iou_t1: 0.6616, iou_t2: 0.6754, iou_t3: 0.5336, iou_t4: 0.6340, iou_t5: 0.5665, loss: 0.1111
+2026-05-08 12:54:26,093 - mmdet - INFO - Iter [25525/120000]	lr: 1.000e-04, eta: 1 day, 23:38:45, time: 4.588, data_time: 3.237, memory: 37118, loss_mask: 0.0957, loss_texture: 0.0194, iou: 0.6222, iou_t0: 0.7009, iou_t1: 0.6997, iou_t2: 0.6225, iou_t3: 0.5398, iou_t4: 0.5629, iou_t5: 0.5781, loss: 0.1151
+2026-05-08 12:55:00,775 - mmdet - INFO - Iter [25550/120000]	lr: 1.000e-04, eta: 1 day, 23:07:24, time: 1.387, data_time: 0.020, memory: 37118, loss_mask: 0.0924, loss_texture: 0.0184, iou: 0.6159, iou_t0: 0.6360, iou_t1: 0.6235, iou_t2: 0.6999, iou_t3: 0.6203, iou_t4: 0.5604, iou_t5: 0.5293, loss: 0.1108
+2026-05-08 12:55:34,901 - mmdet - INFO - Iter [25575/120000]	lr: 1.000e-04, eta: 1 day, 22:37:13, time: 1.365, data_time: 0.019, memory: 37118, loss_mask: 0.0893, loss_texture: 0.0177, iou: 0.5993, iou_t0: 0.6711, iou_t1: 0.5843, iou_t2: 0.6428, iou_t3: 0.6330, iou_t4: 0.5310, iou_t5: 0.5453, loss: 0.1070
+2026-05-08 12:56:09,272 - mmdet - INFO - Iter [25600/120000]	lr: 1.000e-04, eta: 1 day, 22:10:07, time: 1.375, data_time: 0.019, memory: 37118, loss_mask: 0.0905, loss_texture: 0.0182, iou: 0.6133, iou_t0: 0.6031, iou_t1: 0.6111, iou_t2: 0.6893, iou_t3: 0.5895, iou_t4: 0.5087, iou_t5: 0.5555, loss: 0.1088
+2026-05-08 12:56:43,662 - mmdet - INFO - Iter [25625/120000]	lr: 1.000e-04, eta: 1 day, 21:45:12, time: 1.376, data_time: 0.019, memory: 37118, loss_mask: 0.0966, loss_texture: 0.0193, iou: 0.6297, iou_t0: 0.6216, iou_t1: 0.5897, iou_t2: 0.5606, iou_t3: 0.6227, iou_t4: 0.6427, iou_t5: 0.6781, loss: 0.1158
+2026-05-08 12:57:18,145 - mmdet - INFO - Iter [25650/120000]	lr: 1.000e-04, eta: 1 day, 21:22:22, time: 1.379, data_time: 0.020, memory: 37118, loss_mask: 0.1071, loss_texture: 0.0195, iou: 0.6431, iou_t0: 0.6117, iou_t1: 0.7022, iou_t2: 0.6261, iou_t3: 0.6214, iou_t4: 0.6207, iou_t5: 0.6959, loss: 0.1266
+2026-05-08 12:57:52,342 - mmdet - INFO - Iter [25675/120000]	lr: 1.000e-04, eta: 1 day, 21:00:31, time: 1.368, data_time: 0.019, memory: 37118, loss_mask: 0.1151, loss_texture: 0.0220, iou: 0.6440, iou_t0: 0.6710, iou_t1: 0.6921, iou_t2: 0.6070, iou_t3: 0.6113, iou_t4: 0.6719, iou_t5: 0.6400, loss: 0.1371
+2026-05-08 12:58:26,612 - mmdet - INFO - Iter [25700/120000]	lr: 1.000e-04, eta: 1 day, 20:40:21, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.0866, loss_texture: 0.0173, iou: 0.5998, iou_t0: 0.6414, iou_t1: 0.5525, iou_t2: 0.6383, iou_t3: 0.6166, iou_t4: 0.6044, iou_t5: 0.5299, loss: 0.1039
+2026-05-08 12:59:01,838 - mmdet - INFO - Iter [25725/120000]	lr: 1.000e-04, eta: 1 day, 20:23:37, time: 1.409, data_time: 0.020, memory: 37118, loss_mask: 0.0996, loss_texture: 0.0203, iou: 0.6646, iou_t0: 0.7087, iou_t1: 0.8063, iou_t2: 0.7406, iou_t3: 0.6094, iou_t4: 0.5435, iou_t5: 0.6052, loss: 0.1198
+2026-05-08 12:59:35,939 - mmdet - INFO - Iter [25750/120000]	lr: 1.000e-04, eta: 1 day, 20:05:35, time: 1.364, data_time: 0.020, memory: 37118, loss_mask: 0.0900, loss_texture: 0.0175, iou: 0.6103, iou_t0: 0.6157, iou_t1: 0.6869, iou_t2: 0.6651, iou_t3: 0.7094, iou_t4: 0.5318, iou_t5: 0.6461, loss: 0.1074
+2026-05-08 13:00:09,405 - mmdet - INFO - Iter [25775/120000]	lr: 1.000e-04, eta: 1 day, 19:47:24, time: 1.339, data_time: 0.019, memory: 37118, loss_mask: 0.0977, loss_texture: 0.0191, iou: 0.5780, iou_t0: 0.6016, iou_t1: 0.5334, iou_t2: 0.5588, iou_t3: 0.5804, iou_t4: 0.5330, iou_t5: 0.6473, loss: 0.1167
+2026-05-08 13:00:43,483 - mmdet - INFO - Iter [25800/120000]	lr: 1.000e-04, eta: 1 day, 19:31:31, time: 1.363, data_time: 0.019, memory: 37118, loss_mask: 0.1007, loss_texture: 0.0193, iou: 0.6073, iou_t0: 0.5733, iou_t1: 0.5770, iou_t2: 0.5716, iou_t3: 0.6685, iou_t4: 0.5919, iou_t5: 0.6050, loss: 0.1200
+2026-05-08 13:01:17,402 - mmdet - INFO - Iter [25825/120000]	lr: 1.000e-04, eta: 1 day, 19:16:15, time: 1.357, data_time: 0.020, memory: 37118, loss_mask: 0.0879, loss_texture: 0.0176, iou: 0.6101, iou_t0: 0.5705, iou_t1: 0.6780, iou_t2: 0.6034, iou_t3: 0.5622, iou_t4: 0.6517, iou_t5: 0.6662, loss: 0.1056
+2026-05-08 13:01:51,937 - mmdet - INFO - Iter [25850/120000]	lr: 1.000e-04, eta: 1 day, 19:03:00, time: 1.381, data_time: 0.019, memory: 37118, loss_mask: 0.0978, loss_texture: 0.0200, iou: 0.6085, iou_t0: 0.5488, iou_t1: 0.6423, iou_t2: 0.6316, iou_t3: 0.6230, iou_t4: 0.5923, iou_t5: 0.5485, loss: 0.1177
+2026-05-08 13:02:26,337 - mmdet - INFO - Iter [25875/120000]	lr: 1.000e-04, eta: 1 day, 18:50:13, time: 1.376, data_time: 0.019, memory: 37118, loss_mask: 0.1057, loss_texture: 0.0203, iou: 0.6329, iou_t0: 0.6638, iou_t1: 0.5734, iou_t2: 0.6611, iou_t3: 0.5781, iou_t4: 0.7077, iou_t5: 0.5560, loss: 0.1259
+2026-05-08 13:03:00,589 - mmdet - INFO - Iter [25900/120000]	lr: 1.000e-04, eta: 1 day, 18:37:51, time: 1.370, data_time: 0.019, memory: 37118, loss_mask: 0.0972, loss_texture: 0.0187, iou: 0.6137, iou_t0: 0.6555, iou_t1: 0.6404, iou_t2: 0.6499, iou_t3: 0.5123, iou_t4: 0.5750, iou_t5: 0.5656, loss: 0.1158
+2026-05-08 13:03:34,267 - mmdet - INFO - Iter [25925/120000]	lr: 1.000e-04, eta: 1 day, 18:25:10, time: 1.347, data_time: 0.020, memory: 37118, loss_mask: 0.0919, loss_texture: 0.0183, iou: 0.5932, iou_t0: 0.6972, iou_t1: 0.5940, iou_t2: 0.6265, iou_t3: 0.5933, iou_t4: 0.6240, iou_t5: 0.5160, loss: 0.1102
+2026-05-08 13:04:08,688 - mmdet - INFO - Iter [25950/120000]	lr: 1.000e-04, eta: 1 day, 18:14:20, time: 1.377, data_time: 0.020, memory: 37118, loss_mask: 0.1055, loss_texture: 0.0208, iou: 0.6242, iou_t0: 0.6654, iou_t1: 0.5583, iou_t2: 0.6560, iou_t3: 0.6104, iou_t4: 0.5381, iou_t5: 0.6208, loss: 0.1262
+2026-05-08 13:04:42,449 - mmdet - INFO - Iter [25975/120000]	lr: 1.000e-04, eta: 1 day, 18:02:58, time: 1.350, data_time: 0.019, memory: 37118, loss_mask: 0.0957, loss_texture: 0.0189, iou: 0.5914, iou_t0: 0.6568, iou_t1: 0.5757, iou_t2: 0.5954, iou_t3: 0.5676, iou_t4: 0.5070, iou_t5: 0.6184, loss: 0.1146
+2026-05-08 13:05:17,211 - mmdet - INFO - 
+--- Val evaluation at iter 26000 ---
+2026-05-08 13:06:33,851 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 87.54       | 93.28       |
+| building   | 45.25       | 59.08       |
+| Summary    | mIoU: 66.40 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 13:06:35,234 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 13:06:35,234 - mmdet - INFO - Iter [26000/120000]	lr: 1.000e-04, eta: 1 day, 17:53:42, time: 1.391, data_time: 0.019, memory: 37118, val/mIoU: 0.6640, val/IoU.building: 0.4525, val/IoU.background: 0.8754, val/Pseudo_mIoU: 0.7618, loss_mask: 0.1004, loss_texture: 0.0195, iou: 0.6331, iou_t0: 0.6155, iou_t1: 0.6392, iou_t2: 0.6610, iou_t3: 0.6987, iou_t4: 0.6360, iou_t5: 0.5873, loss: 0.1200
+2026-05-08 13:07:09,778 - mmdet - INFO - Iter [26025/120000]	lr: 1.000e-04, eta: 1 day, 19:43:39, time: 4.503, data_time: 3.141, memory: 37118, loss_mask: 0.0907, loss_texture: 0.0178, iou: 0.6161, iou_t0: 0.6235, iou_t1: 0.6931, iou_t2: 0.6049, iou_t3: 0.6449, iou_t4: 0.4739, iou_t5: 0.4846, loss: 0.1085
+2026-05-08 13:07:43,647 - mmdet - INFO - Iter [26050/120000]	lr: 1.000e-04, eta: 1 day, 19:31:01, time: 1.355, data_time: 0.019, memory: 37118, loss_mask: 0.0893, loss_texture: 0.0182, iou: 0.6030, iou_t0: 0.7055, iou_t1: 0.6433, iou_t2: 0.5750, iou_t3: 0.6189, iou_t4: 0.5506, iou_t5: 0.5042, loss: 0.1075
+2026-05-08 13:08:17,653 - mmdet - INFO - Iter [26075/120000]	lr: 1.000e-04, eta: 1 day, 19:19:09, time: 1.360, data_time: 0.019, memory: 37118, loss_mask: 0.0878, loss_texture: 0.0178, iou: 0.6098, iou_t0: 0.5944, iou_t1: 0.6411, iou_t2: 0.5886, iou_t3: 0.6269, iou_t4: 0.6627, iou_t5: 0.5757, loss: 0.1055
+2026-05-08 13:08:52,501 - mmdet - INFO - Iter [26100/120000]	lr: 1.000e-04, eta: 1 day, 19:08:59, time: 1.394, data_time: 0.019, memory: 37118, loss_mask: 0.0945, loss_texture: 0.0193, iou: 0.6257, iou_t0: 0.6155, iou_t1: 0.6057, iou_t2: 0.7342, iou_t3: 0.6201, iou_t4: 0.6502, iou_t5: 0.5764, loss: 0.1138
+2026-05-08 13:09:26,784 - mmdet - INFO - Iter [26125/120000]	lr: 1.000e-04, eta: 1 day, 18:58:28, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.0999, loss_texture: 0.0201, iou: 0.5965, iou_t0: 0.5638, iou_t1: 0.6261, iou_t2: 0.6397, iou_t3: 0.6440, iou_t4: 0.4465, iou_t5: 0.6810, loss: 0.1200
+2026-05-08 13:10:01,414 - mmdet - INFO - Iter [26150/120000]	lr: 1.000e-04, eta: 1 day, 18:48:51, time: 1.385, data_time: 0.019, memory: 37118, loss_mask: 0.0972, loss_texture: 0.0196, iou: 0.6141, iou_t0: 0.6762, iou_t1: 0.6086, iou_t2: 0.5941, iou_t3: 0.5631, iou_t4: 0.6735, iou_t5: 0.5890, loss: 0.1169
+2026-05-08 13:10:35,619 - mmdet - INFO - Iter [26175/120000]	lr: 1.000e-04, eta: 1 day, 18:39:03, time: 1.368, data_time: 0.019, memory: 37118, loss_mask: 0.0947, loss_texture: 0.0188, iou: 0.6350, iou_t0: 0.5913, iou_t1: 0.7264, iou_t2: 0.6646, iou_t3: 0.6189, iou_t4: 0.6648, iou_t5: 0.5429, loss: 0.1135
+2026-05-08 13:11:09,608 - mmdet - INFO - Iter [26200/120000]	lr: 1.000e-04, eta: 1 day, 18:29:21, time: 1.360, data_time: 0.019, memory: 37118, loss_mask: 0.0965, loss_texture: 0.0192, iou: 0.6099, iou_t0: 0.5695, iou_t1: 0.6096, iou_t2: 0.5791, iou_t3: 0.7155, iou_t4: 0.5372, iou_t5: 0.6193, loss: 0.1157
+2026-05-08 13:11:43,972 - mmdet - INFO - Iter [26225/120000]	lr: 1.000e-04, eta: 1 day, 18:20:31, time: 1.375, data_time: 0.019, memory: 37118, loss_mask: 0.0983, loss_texture: 0.0199, iou: 0.6494, iou_t0: 0.6983, iou_t1: 0.6290, iou_t2: 0.7378, iou_t3: 0.5957, iou_t4: 0.5236, iou_t5: 0.6005, loss: 0.1182
+2026-05-08 13:12:17,821 - mmdet - INFO - Iter [26250/120000]	lr: 1.000e-04, eta: 1 day, 18:11:21, time: 1.354, data_time: 0.019, memory: 37118, loss_mask: 0.0945, loss_texture: 0.0192, iou: 0.5950, iou_t0: 0.6951, iou_t1: 0.6288, iou_t2: 0.5690, iou_t3: 0.4939, iou_t4: 0.5752, iou_t5: 0.6073, loss: 0.1138
+2026-05-08 13:12:52,246 - mmdet - INFO - Iter [26275/120000]	lr: 1.000e-04, eta: 1 day, 18:03:14, time: 1.377, data_time: 0.019, memory: 37118, loss_mask: 0.0918, loss_texture: 0.0180, iou: 0.6131, iou_t0: 0.5457, iou_t1: 0.6504, iou_t2: 0.6083, iou_t3: 0.6534, iou_t4: 0.5868, iou_t5: 0.5908, loss: 0.1098
+2026-05-08 13:13:26,008 - mmdet - INFO - Iter [26300/120000]	lr: 1.000e-04, eta: 1 day, 17:54:37, time: 1.350, data_time: 0.019, memory: 37118, loss_mask: 0.0888, loss_texture: 0.0183, iou: 0.6473, iou_t0: 0.6227, iou_t1: 0.6758, iou_t2: 0.6214, iou_t3: 0.5769, iou_t4: 0.7325, iou_t5: 0.6921, loss: 0.1071
+2026-05-08 13:14:01,490 - mmdet - INFO - Iter [26325/120000]	lr: 1.000e-04, eta: 1 day, 17:48:20, time: 1.419, data_time: 0.020, memory: 37118, loss_mask: 0.1094, loss_texture: 0.0214, iou: 0.6566, iou_t0: 0.7014, iou_t1: 0.6989, iou_t2: 0.7422, iou_t3: 0.6790, iou_t4: 0.4475, iou_t5: 0.6029, loss: 0.1308
+2026-05-08 13:14:36,037 - mmdet - INFO - Iter [26350/120000]	lr: 1.000e-04, eta: 1 day, 17:41:10, time: 1.382, data_time: 0.020, memory: 37118, loss_mask: 0.0965, loss_texture: 0.0193, iou: 0.6357, iou_t0: 0.5493, iou_t1: 0.6135, iou_t2: 0.5935, iou_t3: 0.6758, iou_t4: 0.6454, iou_t5: 0.6361, loss: 0.1158
+2026-05-08 13:15:10,892 - mmdet - INFO - Iter [26375/120000]	lr: 1.000e-04, eta: 1 day, 17:34:36, time: 1.394, data_time: 0.019, memory: 37118, loss_mask: 0.0994, loss_texture: 0.0195, iou: 0.6226, iou_t0: 0.5979, iou_t1: 0.5833, iou_t2: 0.6096, iou_t3: 0.6170, iou_t4: 0.7092, iou_t5: 0.6033, loss: 0.1190
+2026-05-08 13:15:44,425 - mmdet - INFO - Iter [26400/120000]	lr: 1.000e-04, eta: 1 day, 17:26:46, time: 1.341, data_time: 0.020, memory: 37118, loss_mask: 0.1002, loss_texture: 0.0191, iou: 0.5968, iou_t0: 0.6505, iou_t1: 0.5528, iou_t2: 0.5729, iou_t3: 0.6933, iou_t4: 0.5529, iou_t5: 0.6101, loss: 0.1193
+2026-05-08 13:16:18,590 - mmdet - INFO - Iter [26425/120000]	lr: 1.000e-04, eta: 1 day, 17:19:53, time: 1.367, data_time: 0.019, memory: 37118, loss_mask: 0.0933, loss_texture: 0.0188, iou: 0.6154, iou_t0: 0.6476, iou_t1: 0.6613, iou_t2: 0.5832, iou_t3: 0.5971, iou_t4: 0.5337, iou_t5: 0.6283, loss: 0.1121
+2026-05-08 13:16:52,673 - mmdet - INFO - Iter [26450/120000]	lr: 1.000e-04, eta: 1 day, 17:13:08, time: 1.363, data_time: 0.019, memory: 37118, loss_mask: 0.0938, loss_texture: 0.0185, iou: 0.6258, iou_t0: 0.7480, iou_t1: 0.6561, iou_t2: 0.5673, iou_t3: 0.5794, iou_t4: 0.5695, iou_t5: 0.6585, loss: 0.1123
+2026-05-08 13:17:26,723 - mmdet - INFO - Iter [26475/120000]	lr: 1.000e-04, eta: 1 day, 17:06:33, time: 1.362, data_time: 0.019, memory: 37118, loss_mask: 0.0943, loss_texture: 0.0187, iou: 0.6049, iou_t0: 0.5995, iou_t1: 0.6116, iou_t2: 0.6270, iou_t3: 0.6181, iou_t4: 0.5756, iou_t5: 0.5766, loss: 0.1131
+2026-05-08 13:18:01,360 - mmdet - INFO - 
+--- Val evaluation at iter 26500 ---
+2026-05-08 13:19:17,894 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 89.64       | 93.28       |
+| building   | 49.82       | 59.08       |
+| Summary    | mIoU: 69.73 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 13:19:20,559 - mmdet - INFO - ★ New best mIoU: 69.73% (prev: 68.12%, Δ=+1.61%) → saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/best_model.pth
+2026-05-08 13:19:20,565 - mmdet - INFO - Iter [26500/120000]	lr: 1.000e-04, eta: 1 day, 17:00:47, time: 1.385, data_time: 0.019, memory: 37118, val/mIoU: 0.6973, val/IoU.building: 0.4982, val/IoU.background: 0.8964, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0964, loss_texture: 0.0190, iou: 0.6105, iou_t0: 0.6487, iou_t1: 0.6595, iou_t2: 0.6115, iou_t3: 0.5228, iou_t4: 0.5857, iou_t5: 0.6397, loss: 0.1154
+2026-05-08 13:19:54,877 - mmdet - INFO - Iter [26525/120000]	lr: 1.000e-04, eta: 1 day, 18:15:42, time: 4.541, data_time: 3.188, memory: 37118, loss_mask: 0.0914, loss_texture: 0.0184, iou: 0.6079, iou_t0: 0.5594, iou_t1: 0.6231, iou_t2: 0.7251, iou_t3: 0.6182, iou_t4: 0.5638, iou_t5: 0.5708, loss: 0.1098
+2026-05-08 13:20:29,488 - mmdet - INFO - Iter [26550/120000]	lr: 1.000e-04, eta: 1 day, 18:08:55, time: 1.384, data_time: 0.019, memory: 37118, loss_mask: 0.1095, loss_texture: 0.0211, iou: 0.6088, iou_t0: 0.6269, iou_t1: 0.6433, iou_t2: 0.6253, iou_t3: 0.5506, iou_t4: 0.6070, iou_t5: 0.6675, loss: 0.1306
+2026-05-08 13:21:03,847 - mmdet - INFO - Iter [26575/120000]	lr: 1.000e-04, eta: 1 day, 18:02:05, time: 1.374, data_time: 0.019, memory: 37118, loss_mask: 0.0989, loss_texture: 0.0196, iou: 0.6054, iou_t0: 0.5930, iou_t1: 0.6548, iou_t2: 0.5497, iou_t3: 0.5474, iou_t4: 0.6396, iou_t5: 0.5470, loss: 0.1185
+2026-05-08 13:21:38,291 - mmdet - INFO - Iter [26600/120000]	lr: 1.000e-04, eta: 1 day, 17:55:32, time: 1.378, data_time: 0.020, memory: 37118, loss_mask: 0.1034, loss_texture: 0.0200, iou: 0.6217, iou_t0: 0.6795, iou_t1: 0.6070, iou_t2: 0.6442, iou_t3: 0.5922, iou_t4: 0.6048, iou_t5: 0.5913, loss: 0.1234
+2026-05-08 13:22:12,594 - mmdet - INFO - Iter [26625/120000]	lr: 1.000e-04, eta: 1 day, 17:49:01, time: 1.372, data_time: 0.020, memory: 37118, loss_mask: 0.0945, loss_texture: 0.0181, iou: 0.6099, iou_t0: 0.6442, iou_t1: 0.5971, iou_t2: 0.5746, iou_t3: 0.5950, iou_t4: 0.6018, iou_t5: 0.5902, loss: 0.1126
+2026-05-08 13:22:46,051 - mmdet - INFO - Iter [26650/120000]	lr: 1.000e-04, eta: 1 day, 17:41:54, time: 1.338, data_time: 0.020, memory: 37118, loss_mask: 0.0911, loss_texture: 0.0175, iou: 0.6040, iou_t0: 0.7037, iou_t1: 0.5258, iou_t2: 0.5991, iou_t3: 0.6915, iou_t4: 0.6341, iou_t5: 0.5910, loss: 0.1086
+2026-05-08 13:23:20,543 - mmdet - INFO - Iter [26675/120000]	lr: 1.000e-04, eta: 1 day, 17:35:56, time: 1.380, data_time: 0.019, memory: 37118, loss_mask: 0.1027, loss_texture: 0.0201, iou: 0.6454, iou_t0: 0.7122, iou_t1: 0.6538, iou_t2: 0.6371, iou_t3: 0.5453, iou_t4: 0.7231, iou_t5: 0.6111, loss: 0.1227
+2026-05-08 13:23:55,050 - mmdet - INFO - Iter [26700/120000]	lr: 1.000e-04, eta: 1 day, 17:30:08, time: 1.380, data_time: 0.019, memory: 37118, loss_mask: 0.0923, loss_texture: 0.0187, iou: 0.6095, iou_t0: 0.6204, iou_t1: 0.6024, iou_t2: 0.5755, iou_t3: 0.6514, iou_t4: 0.6014, iou_t5: 0.5947, loss: 0.1109
+2026-05-08 13:24:29,062 - mmdet - INFO - Iter [26725/120000]	lr: 1.000e-04, eta: 1 day, 17:24:02, time: 1.360, data_time: 0.019, memory: 37118, loss_mask: 0.0997, loss_texture: 0.0199, iou: 0.6234, iou_t0: 0.5890, iou_t1: 0.6588, iou_t2: 0.6320, iou_t3: 0.6216, iou_t4: 0.7163, iou_t5: 0.5686, loss: 0.1196
+2026-05-08 13:25:02,846 - mmdet - INFO - Iter [26750/120000]	lr: 1.000e-04, eta: 1 day, 17:17:54, time: 1.351, data_time: 0.019, memory: 37118, loss_mask: 0.1227, loss_texture: 0.0204, iou: 0.5929, iou_t0: 0.5514, iou_t1: 0.6109, iou_t2: 0.5644, iou_t3: 0.6497, iou_t4: 0.5597, iou_t5: 0.5866, loss: 0.1431
+2026-05-08 13:25:37,110 - mmdet - INFO - Iter [26775/120000]	lr: 1.000e-04, eta: 1 day, 17:12:20, time: 1.371, data_time: 0.019, memory: 37118, loss_mask: 0.1179, loss_texture: 0.0214, iou: 0.5799, iou_t0: 0.5877, iou_t1: 0.6747, iou_t2: 0.6050, iou_t3: 0.6002, iou_t4: 0.6164, iou_t5: 0.5170, loss: 0.1393
+2026-05-08 13:26:11,164 - mmdet - INFO - Iter [26800/120000]	lr: 1.000e-04, eta: 1 day, 17:06:44, time: 1.362, data_time: 0.019, memory: 37118, loss_mask: 0.1096, loss_texture: 0.0203, iou: 0.5994, iou_t0: 0.6272, iou_t1: 0.6366, iou_t2: 0.6066, iou_t3: 0.6416, iou_t4: 0.6282, iou_t5: 0.4602, loss: 0.1299
+2026-05-08 13:26:45,430 - mmdet - INFO - Iter [26825/120000]	lr: 1.000e-04, eta: 1 day, 17:01:27, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.1046, loss_texture: 0.0199, iou: 0.6136, iou_t0: 0.6343, iou_t1: 0.5830, iou_t2: 0.6443, iou_t3: 0.5259, iou_t4: 0.5868, iou_t5: 0.7035, loss: 0.1245
+2026-05-08 13:27:19,593 - mmdet - INFO - Iter [26850/120000]	lr: 1.000e-04, eta: 1 day, 16:56:13, time: 1.367, data_time: 0.019, memory: 37118, loss_mask: 0.1071, loss_texture: 0.0205, iou: 0.6103, iou_t0: 0.5320, iou_t1: 0.5961, iou_t2: 0.5949, iou_t3: 0.6195, iou_t4: 0.6869, iou_t5: 0.6653, loss: 0.1277
+2026-05-08 13:27:53,837 - mmdet - INFO - Iter [26875/120000]	lr: 1.000e-04, eta: 1 day, 16:51:10, time: 1.370, data_time: 0.019, memory: 37118, loss_mask: 0.1071, loss_texture: 0.0199, iou: 0.6136, iou_t0: 0.6240, iou_t1: 0.6784, iou_t2: 0.5526, iou_t3: 0.6703, iou_t4: 0.6247, iou_t5: 0.5523, loss: 0.1270
+2026-05-08 13:28:28,259 - mmdet - INFO - Iter [26900/120000]	lr: 1.000e-04, eta: 1 day, 16:46:22, time: 1.377, data_time: 0.019, memory: 37118, loss_mask: 0.1034, loss_texture: 0.0203, iou: 0.5961, iou_t0: 0.5673, iou_t1: 0.6032, iou_t2: 0.6116, iou_t3: 0.5829, iou_t4: 0.5728, iou_t5: 0.5800, loss: 0.1237
+2026-05-08 13:29:02,564 - mmdet - INFO - Iter [26925/120000]	lr: 1.000e-04, eta: 1 day, 16:41:36, time: 1.372, data_time: 0.020, memory: 37118, loss_mask: 0.1026, loss_texture: 0.0201, iou: 0.6305, iou_t0: 0.6006, iou_t1: 0.6872, iou_t2: 0.5913, iou_t3: 0.6128, iou_t4: 0.6370, iou_t5: 0.6106, loss: 0.1227
+2026-05-08 13:29:36,863 - mmdet - INFO - Iter [26950/120000]	lr: 1.000e-04, eta: 1 day, 16:36:56, time: 1.372, data_time: 0.019, memory: 37118, loss_mask: 0.1017, loss_texture: 0.0193, iou: 0.6153, iou_t0: 0.5815, iou_t1: 0.7014, iou_t2: 0.6211, iou_t3: 0.6645, iou_t4: 0.5796, iou_t5: 0.5497, loss: 0.1210
+2026-05-08 13:30:10,539 - mmdet - INFO - Iter [26975/120000]	lr: 1.000e-04, eta: 1 day, 16:31:52, time: 1.347, data_time: 0.019, memory: 37118, loss_mask: 0.0943, loss_texture: 0.0180, iou: 0.5903, iou_t0: 0.6523, iou_t1: 0.5486, iou_t2: 0.6286, iou_t3: 0.5928, iou_t4: 0.5533, iou_t5: 0.6651, loss: 0.1124
+2026-05-08 13:30:44,380 - mmdet - INFO - 
+--- Val evaluation at iter 27000 ---
+2026-05-08 13:32:01,357 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 88.79       | 93.28       |
+| building   | 47.51       | 59.08       |
+| Summary    | mIoU: 68.15 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 13:32:02,712 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 13:32:02,713 - mmdet - INFO - Iter [27000/120000]	lr: 1.000e-04, eta: 1 day, 16:27:04, time: 1.354, data_time: 0.020, memory: 37118, val/mIoU: 0.6815, val/IoU.building: 0.4751, val/IoU.background: 0.8879, val/Pseudo_mIoU: 0.7618, loss_mask: 0.1044, loss_texture: 0.0195, iou: 0.5971, iou_t0: 0.6213, iou_t1: 0.5625, iou_t2: 0.5151, iou_t3: 0.6180, iou_t4: 0.6036, iou_t5: 0.6527, loss: 0.1239
+2026-05-08 13:32:37,013 - mmdet - INFO - Iter [27025/120000]	lr: 1.000e-04, eta: 1 day, 17:22:37, time: 4.505, data_time: 3.154, memory: 37118, loss_mask: 0.0999, loss_texture: 0.0197, iou: 0.6356, iou_t0: 0.5810, iou_t1: 0.7043, iou_t2: 0.6138, iou_t3: 0.6168, iou_t4: 0.6307, iou_t5: 0.6240, loss: 0.1196
+2026-05-08 13:33:11,536 - mmdet - INFO - Iter [27050/120000]	lr: 1.000e-04, eta: 1 day, 17:17:46, time: 1.381, data_time: 0.021, memory: 37118, loss_mask: 0.0969, loss_texture: 0.0182, iou: 0.6004, iou_t0: 0.6159, iou_t1: 0.6340, iou_t2: 0.6405, iou_t3: 0.5501, iou_t4: 0.5346, iou_t5: 0.5707, loss: 0.1151
+2026-05-08 13:33:45,048 - mmdet - INFO - Iter [27075/120000]	lr: 1.000e-04, eta: 1 day, 17:12:16, time: 1.340, data_time: 0.019, memory: 37118, loss_mask: 0.1009, loss_texture: 0.0198, iou: 0.6056, iou_t0: 0.6545, iou_t1: 0.5999, iou_t2: 0.6411, iou_t3: 0.5100, iou_t4: 0.6158, iou_t5: 0.5729, loss: 0.1206
+2026-05-08 13:34:18,861 - mmdet - INFO - Iter [27100/120000]	lr: 1.000e-04, eta: 1 day, 17:07:07, time: 1.353, data_time: 0.020, memory: 37118, loss_mask: 0.0903, loss_texture: 0.0182, iou: 0.6175, iou_t0: 0.6030, iou_t1: 0.6714, iou_t2: 0.5614, iou_t3: 0.7102, iou_t4: 0.5952, iou_t5: 0.6788, loss: 0.1084
+2026-05-08 13:34:52,618 - mmdet - INFO - Iter [27125/120000]	lr: 1.000e-04, eta: 1 day, 17:02:02, time: 1.350, data_time: 0.020, memory: 37118, loss_mask: 0.0896, loss_texture: 0.0188, iou: 0.6331, iou_t0: 0.7587, iou_t1: 0.6522, iou_t2: 0.6655, iou_t3: 0.5289, iou_t4: 0.6184, iou_t5: 0.6780, loss: 0.1084
+2026-05-08 13:35:26,689 - mmdet - INFO - Iter [27150/120000]	lr: 1.000e-04, eta: 1 day, 16:57:16, time: 1.363, data_time: 0.020, memory: 37118, loss_mask: 0.0976, loss_texture: 0.0186, iou: 0.6234, iou_t0: 0.6171, iou_t1: 0.6291, iou_t2: 0.6584, iou_t3: 0.5610, iou_t4: 0.6629, iou_t5: 0.6292, loss: 0.1162
+2026-05-08 13:36:01,339 - mmdet - INFO - Iter [27175/120000]	lr: 1.000e-04, eta: 1 day, 16:53:01, time: 1.386, data_time: 0.020, memory: 37118, loss_mask: 0.0996, loss_texture: 0.0195, iou: 0.6080, iou_t0: 0.6696, iou_t1: 0.6623, iou_t2: 0.5365, iou_t3: 0.6160, iou_t4: 0.6071, iou_t5: 0.5470, loss: 0.1190
+2026-05-08 13:36:35,536 - mmdet - INFO - Iter [27200/120000]	lr: 1.000e-04, eta: 1 day, 16:48:32, time: 1.368, data_time: 0.020, memory: 37118, loss_mask: 0.0976, loss_texture: 0.0198, iou: 0.5976, iou_t0: 0.5749, iou_t1: 0.5704, iou_t2: 0.6597, iou_t3: 0.6353, iou_t4: 0.5414, iou_t5: 0.6359, loss: 0.1174
+2026-05-08 13:37:09,799 - mmdet - INFO - Iter [27225/120000]	lr: 1.000e-04, eta: 1 day, 16:44:11, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.1029, loss_texture: 0.0204, iou: 0.6073, iou_t0: 0.6642, iou_t1: 0.5868, iou_t2: 0.5844, iou_t3: 0.5692, iou_t4: 0.5902, iou_t5: 0.5938, loss: 0.1233
+2026-05-08 13:37:44,520 - mmdet - INFO - Iter [27250/120000]	lr: 1.000e-04, eta: 1 day, 16:40:14, time: 1.389, data_time: 0.020, memory: 37118, loss_mask: 0.1036, loss_texture: 0.0206, iou: 0.6379, iou_t0: 0.6027, iou_t1: 0.6771, iou_t2: 0.6005, iou_t3: 0.6883, iou_t4: 0.6571, iou_t5: 0.5912, loss: 0.1241
+2026-05-08 13:38:18,194 - mmdet - INFO - Iter [27275/120000]	lr: 1.000e-04, eta: 1 day, 16:35:38, time: 1.347, data_time: 0.020, memory: 37118, loss_mask: 0.0940, loss_texture: 0.0190, iou: 0.6148, iou_t0: 0.6340, iou_t1: 0.6194, iou_t2: 0.6369, iou_t3: 0.6026, iou_t4: 0.5661, iou_t5: 0.6237, loss: 0.1130
+2026-05-08 13:38:51,719 - mmdet - INFO - Iter [27300/120000]	lr: 1.000e-04, eta: 1 day, 16:31:02, time: 1.341, data_time: 0.020, memory: 37118, loss_mask: 0.0908, loss_texture: 0.0178, iou: 0.5917, iou_t0: 0.5742, iou_t1: 0.5919, iou_t2: 0.5079, iou_t3: 0.5783, iou_t4: 0.6808, iou_t5: 0.5140, loss: 0.1086
+2026-05-08 13:39:26,103 - mmdet - INFO - Iter [27325/120000]	lr: 1.000e-04, eta: 1 day, 16:27:05, time: 1.375, data_time: 0.021, memory: 37118, loss_mask: 0.0971, loss_texture: 0.0196, iou: 0.6092, iou_t0: 0.6325, iou_t1: 0.6100, iou_t2: 0.4869, iou_t3: 0.6299, iou_t4: 0.6018, iou_t5: 0.6368, loss: 0.1168
+2026-05-08 13:39:59,473 - mmdet - INFO - Iter [27350/120000]	lr: 1.000e-04, eta: 1 day, 16:22:33, time: 1.335, data_time: 0.020, memory: 37118, loss_mask: 0.1002, loss_texture: 0.0197, iou: 0.6206, iou_t0: 0.6619, iou_t1: 0.6261, iou_t2: 0.6503, iou_t3: 0.5990, iou_t4: 0.7146, iou_t5: 0.5434, loss: 0.1199
+2026-05-08 13:40:33,203 - mmdet - INFO - Iter [27375/120000]	lr: 1.000e-04, eta: 1 day, 16:18:20, time: 1.349, data_time: 0.020, memory: 37118, loss_mask: 0.0953, loss_texture: 0.0186, iou: 0.6232, iou_t0: 0.5871, iou_t1: 0.6155, iou_t2: 0.6409, iou_t3: 0.6013, iou_t4: 0.5526, iou_t5: 0.6216, loss: 0.1139
+2026-05-08 13:41:07,046 - mmdet - INFO - Iter [27400/120000]	lr: 1.000e-04, eta: 1 day, 16:14:15, time: 1.354, data_time: 0.020, memory: 37118, loss_mask: 0.1139, loss_texture: 0.0215, iou: 0.6117, iou_t0: 0.6446, iou_t1: 0.6003, iou_t2: 0.5954, iou_t3: 0.5412, iou_t4: 0.6670, iou_t5: 0.5931, loss: 0.1354
+2026-05-08 13:41:41,067 - mmdet - INFO - Iter [27425/120000]	lr: 1.000e-04, eta: 1 day, 16:10:22, time: 1.361, data_time: 0.020, memory: 37118, loss_mask: 0.1119, loss_texture: 0.0206, iou: 0.6257, iou_t0: 0.6002, iou_t1: 0.5984, iou_t2: 0.6426, iou_t3: 0.6430, iou_t4: 0.7074, iou_t5: 0.6480, loss: 0.1325
+2026-05-08 13:42:14,575 - mmdet - INFO - Iter [27450/120000]	lr: 1.000e-04, eta: 1 day, 16:06:14, time: 1.340, data_time: 0.020, memory: 37118, loss_mask: 0.0974, loss_texture: 0.0191, iou: 0.6178, iou_t0: 0.6563, iou_t1: 0.5920, iou_t2: 0.6070, iou_t3: 0.6076, iou_t4: 0.6334, iou_t5: 0.6447, loss: 0.1165
+2026-05-08 13:42:48,544 - mmdet - INFO - Iter [27475/120000]	lr: 1.000e-04, eta: 1 day, 16:02:27, time: 1.359, data_time: 0.020, memory: 37118, loss_mask: 0.0948, loss_texture: 0.0186, iou: 0.5873, iou_t0: 0.5485, iou_t1: 0.5881, iou_t2: 0.6845, iou_t3: 0.5982, iou_t4: 0.5178, iou_t5: 0.5321, loss: 0.1134
+2026-05-08 13:43:22,431 - mmdet - INFO - 
+--- Val evaluation at iter 27500 ---
+2026-05-08 13:44:36,991 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 88.59       | 93.28       |
+| building   | 47.21       | 59.08       |
+| Summary    | mIoU: 67.90 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 13:44:38,296 - mmdet - INFO - Iter [27500/120000]	lr: 1.000e-04, eta: 1 day, 15:58:41, time: 1.356, data_time: 0.020, memory: 37118, val/mIoU: 0.6790, val/IoU.building: 0.4721, val/IoU.background: 0.8859, val/Pseudo_mIoU: 0.7618, loss_mask: 0.1053, loss_texture: 0.0207, iou: 0.6339, iou_t0: 0.6448, iou_t1: 0.5563, iou_t2: 0.5971, iou_t3: 0.7227, iou_t4: 0.6099, iou_t5: 0.6279, loss: 0.1261
+2026-05-08 13:45:12,300 - mmdet - INFO - Iter [27525/120000]	lr: 1.000e-04, eta: 1 day, 16:41:20, time: 4.395, data_time: 3.055, memory: 37118, loss_mask: 0.1068, loss_texture: 0.0206, iou: 0.6303, iou_t0: 0.5881, iou_t1: 0.6017, iou_t2: 0.6414, iou_t3: 0.7307, iou_t4: 0.6428, iou_t5: 0.5839, loss: 0.1274
+2026-05-08 13:45:46,227 - mmdet - INFO - Iter [27550/120000]	lr: 1.000e-04, eta: 1 day, 16:37:15, time: 1.357, data_time: 0.020, memory: 37118, loss_mask: 0.0944, loss_texture: 0.0185, iou: 0.6103, iou_t0: 0.6237, iou_t1: 0.6207, iou_t2: 0.5659, iou_t3: 0.6649, iou_t4: 0.5851, iou_t5: 0.5940, loss: 0.1129
+2026-05-08 13:46:21,052 - mmdet - INFO - Iter [27575/120000]	lr: 1.000e-04, eta: 1 day, 16:33:46, time: 1.393, data_time: 0.021, memory: 37118, loss_mask: 0.0937, loss_texture: 0.0192, iou: 0.6056, iou_t0: 0.6432, iou_t1: 0.5123, iou_t2: 0.7015, iou_t3: 0.6248, iou_t4: 0.5620, iou_t5: 0.5892, loss: 0.1129
+2026-05-08 13:46:56,510 - mmdet - INFO - Iter [27600/120000]	lr: 1.000e-04, eta: 1 day, 16:30:43, time: 1.418, data_time: 0.020, memory: 37118, loss_mask: 0.1003, loss_texture: 0.0204, iou: 0.6272, iou_t0: 0.6992, iou_t1: 0.6618, iou_t2: 0.6249, iou_t3: 0.5352, iou_t4: 0.6502, iou_t5: 0.5817, loss: 0.1207
+2026-05-08 13:47:31,266 - mmdet - INFO - Iter [27625/120000]	lr: 1.000e-04, eta: 1 day, 16:27:18, time: 1.390, data_time: 0.020, memory: 37118, loss_mask: 0.1040, loss_texture: 0.0203, iou: 0.6334, iou_t0: 0.5744, iou_t1: 0.6161, iou_t2: 0.6742, iou_t3: 0.6935, iou_t4: 0.6408, iou_t5: 0.6031, loss: 0.1244
+2026-05-08 13:48:04,237 - mmdet - INFO - Iter [27650/120000]	lr: 1.000e-04, eta: 1 day, 16:22:54, time: 1.319, data_time: 0.020, memory: 37118, loss_mask: 0.0748, loss_texture: 0.0150, iou: 0.5761, iou_t0: 0.5731, iou_t1: 0.5181, iou_t2: 0.6619, iou_t3: 0.5584, iou_t4: 0.6463, iou_t5: 0.5050, loss: 0.0898
+2026-05-08 13:48:38,110 - mmdet - INFO - Iter [27675/120000]	lr: 1.000e-04, eta: 1 day, 16:19:05, time: 1.355, data_time: 0.019, memory: 37118, loss_mask: 0.0930, loss_texture: 0.0183, iou: 0.6054, iou_t0: 0.5710, iou_t1: 0.5510, iou_t2: 0.6417, iou_t3: 0.6323, iou_t4: 0.5545, iou_t5: 0.6320, loss: 0.1113
+2026-05-08 13:49:12,068 - mmdet - INFO - Iter [27700/120000]	lr: 1.000e-04, eta: 1 day, 16:15:23, time: 1.358, data_time: 0.020, memory: 37118, loss_mask: 0.0956, loss_texture: 0.0192, iou: 0.6082, iou_t0: 0.6198, iou_t1: 0.6250, iou_t2: 0.6253, iou_t3: 0.5744, iou_t4: 0.6008, iou_t5: 0.5360, loss: 0.1147
+2026-05-08 13:49:46,111 - mmdet - INFO - Iter [27725/120000]	lr: 1.000e-04, eta: 1 day, 16:11:48, time: 1.362, data_time: 0.020, memory: 37118, loss_mask: 0.1028, loss_texture: 0.0194, iou: 0.6092, iou_t0: 0.5400, iou_t1: 0.5769, iou_t2: 0.6330, iou_t3: 0.6350, iou_t4: 0.6673, iou_t5: 0.5850, loss: 0.1221
+2026-05-08 13:50:20,201 - mmdet - INFO - Iter [27750/120000]	lr: 1.000e-04, eta: 1 day, 16:08:17, time: 1.364, data_time: 0.020, memory: 37118, loss_mask: 0.1009, loss_texture: 0.0199, iou: 0.6234, iou_t0: 0.6551, iou_t1: 0.6329, iou_t2: 0.6362, iou_t3: 0.5430, iou_t4: 0.6513, iou_t5: 0.6384, loss: 0.1208
+2026-05-08 13:50:54,870 - mmdet - INFO - Iter [27775/120000]	lr: 1.000e-04, eta: 1 day, 16:05:09, time: 1.387, data_time: 0.019, memory: 37118, loss_mask: 0.1031, loss_texture: 0.0200, iou: 0.6411, iou_t0: 0.6600, iou_t1: 0.7070, iou_t2: 0.6858, iou_t3: 0.5851, iou_t4: 0.5694, iou_t5: 0.6445, loss: 0.1232
+2026-05-08 13:51:28,794 - mmdet - INFO - Iter [27800/120000]	lr: 1.000e-04, eta: 1 day, 16:01:39, time: 1.357, data_time: 0.020, memory: 37118, loss_mask: 0.0887, loss_texture: 0.0175, iou: 0.6245, iou_t0: 0.6449, iou_t1: 0.5767, iou_t2: 0.6606, iou_t3: 0.6165, iou_t4: 0.6680, iou_t5: 0.5632, loss: 0.1062
+2026-05-08 13:52:02,982 - mmdet - INFO - Iter [27825/120000]	lr: 1.000e-04, eta: 1 day, 15:58:20, time: 1.367, data_time: 0.020, memory: 37118, loss_mask: 0.0893, loss_texture: 0.0178, iou: 0.5991, iou_t0: 0.7296, iou_t1: 0.5626, iou_t2: 0.5973, iou_t3: 0.5215, iou_t4: 0.5551, iou_t5: 0.5314, loss: 0.1071
+2026-05-08 13:52:37,095 - mmdet - INFO - Iter [27850/120000]	lr: 1.000e-04, eta: 1 day, 15:55:02, time: 1.365, data_time: 0.020, memory: 37118, loss_mask: 0.0944, loss_texture: 0.0187, iou: 0.6000, iou_t0: 0.6445, iou_t1: 0.6122, iou_t2: 0.6130, iou_t3: 0.5506, iou_t4: 0.5207, iou_t5: 0.6623, loss: 0.1131
+2026-05-08 13:53:11,442 - mmdet - INFO - Iter [27875/120000]	lr: 1.000e-04, eta: 1 day, 15:51:55, time: 1.374, data_time: 0.019, memory: 37118, loss_mask: 0.1018, loss_texture: 0.0204, iou: 0.6038, iou_t0: 0.6324, iou_t1: 0.5277, iou_t2: 0.5885, iou_t3: 0.6106, iou_t4: 0.6276, iou_t5: 0.6566, loss: 0.1222
+2026-05-08 13:53:45,009 - mmdet - INFO - Iter [27900/120000]	lr: 1.000e-04, eta: 1 day, 15:48:25, time: 1.343, data_time: 0.020, memory: 37118, loss_mask: 0.0883, loss_texture: 0.0183, iou: 0.6115, iou_t0: 0.4909, iou_t1: 0.6521, iou_t2: 0.6679, iou_t3: 0.5886, iou_t4: 0.5983, iou_t5: 0.6116, loss: 0.1065
+2026-05-08 13:54:19,322 - mmdet - INFO - Iter [27925/120000]	lr: 1.000e-04, eta: 1 day, 15:45:22, time: 1.372, data_time: 0.020, memory: 37118, loss_mask: 0.0977, loss_texture: 0.0197, iou: 0.6269, iou_t0: 0.6720, iou_t1: 0.6264, iou_t2: 0.6377, iou_t3: 0.6363, iou_t4: 0.5513, iou_t5: 0.6095, loss: 0.1174
+2026-05-08 13:54:52,890 - mmdet - INFO - Iter [27950/120000]	lr: 1.000e-04, eta: 1 day, 15:41:58, time: 1.343, data_time: 0.020, memory: 37118, loss_mask: 0.0941, loss_texture: 0.0192, iou: 0.6186, iou_t0: 0.6302, iou_t1: 0.6168, iou_t2: 0.6045, iou_t3: 0.7216, iou_t4: 0.5896, iou_t5: 0.6252, loss: 0.1133
+2026-05-08 13:55:26,890 - mmdet - INFO - Iter [27975/120000]	lr: 1.000e-04, eta: 1 day, 15:38:50, time: 1.360, data_time: 0.019, memory: 37118, loss_mask: 0.0912, loss_texture: 0.0184, iou: 0.6403, iou_t0: 0.5226, iou_t1: 0.6523, iou_t2: 0.7097, iou_t3: 0.7091, iou_t4: 0.6169, iou_t5: 0.5694, loss: 0.1096
+2026-05-08 13:56:01,482 - mmdet - INFO - 
+--- Val evaluation at iter 28000 ---
+2026-05-08 13:57:17,696 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 88.39       | 93.28       |
+| building   | 47.06       | 59.08       |
+| Summary    | mIoU: 67.72 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 13:57:19,007 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 13:57:19,007 - mmdet - INFO - Iter [28000/120000]	lr: 1.000e-04, eta: 1 day, 15:36:03, time: 1.384, data_time: 0.020, memory: 37118, val/mIoU: 0.6772, val/IoU.building: 0.4706, val/IoU.background: 0.8839, val/Pseudo_mIoU: 0.7618, loss_mask: 0.1052, loss_texture: 0.0204, iou: 0.6305, iou_t0: 0.5990, iou_t1: 0.7065, iou_t2: 0.7104, iou_t3: 0.5064, iou_t4: 0.6340, iou_t5: 0.5634, loss: 0.1256
+2026-05-08 13:57:53,246 - mmdet - INFO - Iter [28025/120000]	lr: 1.000e-04, eta: 1 day, 16:12:24, time: 4.471, data_time: 3.121, memory: 37118, loss_mask: 0.0963, loss_texture: 0.0194, iou: 0.6400, iou_t0: 0.6412, iou_t1: 0.6021, iou_t2: 0.6667, iou_t3: 0.6619, iou_t4: 0.5847, iou_t5: 0.6367, loss: 0.1156
+2026-05-08 13:58:28,021 - mmdet - INFO - Iter [28050/120000]	lr: 1.000e-04, eta: 1 day, 16:09:27, time: 1.391, data_time: 0.020, memory: 37118, loss_mask: 0.1023, loss_texture: 0.0200, iou: 0.6519, iou_t0: 0.6080, iou_t1: 0.6126, iou_t2: 0.6635, iou_t3: 0.6312, iou_t4: 0.6342, iou_t5: 0.6660, loss: 0.1223
+2026-05-08 13:59:02,795 - mmdet - INFO - Iter [28075/120000]	lr: 1.000e-04, eta: 1 day, 16:06:32, time: 1.391, data_time: 0.019, memory: 37118, loss_mask: 0.0948, loss_texture: 0.0188, iou: 0.6083, iou_t0: 0.5548, iou_t1: 0.5632, iou_t2: 0.5900, iou_t3: 0.5656, iou_t4: 0.6265, iou_t5: 0.7047, loss: 0.1136
+2026-05-08 13:59:37,308 - mmdet - INFO - Iter [28100/120000]	lr: 1.000e-04, eta: 1 day, 16:03:32, time: 1.381, data_time: 0.019, memory: 37118, loss_mask: 0.1031, loss_texture: 0.0202, iou: 0.6387, iou_t0: 0.5661, iou_t1: 0.6616, iou_t2: 0.5846, iou_t3: 0.6097, iou_t4: 0.6722, iou_t5: 0.6713, loss: 0.1233
+2026-05-08 14:00:11,270 - mmdet - INFO - Iter [28125/120000]	lr: 1.000e-04, eta: 1 day, 16:00:18, time: 1.358, data_time: 0.020, memory: 37118, loss_mask: 0.0898, loss_texture: 0.0182, iou: 0.6344, iou_t0: 0.6124, iou_t1: 0.6727, iou_t2: 0.6063, iou_t3: 0.6140, iou_t4: 0.5919, iou_t5: 0.6727, loss: 0.1080
+2026-05-08 14:00:45,551 - mmdet - INFO - Iter [28150/120000]	lr: 1.000e-04, eta: 1 day, 15:57:16, time: 1.371, data_time: 0.019, memory: 37118, loss_mask: 0.1149, loss_texture: 0.0219, iou: 0.6169, iou_t0: 0.5732, iou_t1: 0.6710, iou_t2: 0.5615, iou_t3: 0.6349, iou_t4: 0.6298, iou_t5: 0.6656, loss: 0.1368
+2026-05-08 14:01:18,901 - mmdet - INFO - Iter [28175/120000]	lr: 1.000e-04, eta: 1 day, 15:53:49, time: 1.334, data_time: 0.019, memory: 37118, loss_mask: 0.0858, loss_texture: 0.0168, iou: 0.5822, iou_t0: 0.5679, iou_t1: 0.6421, iou_t2: 0.5416, iou_t3: 0.6300, iou_t4: 0.6405, iou_t5: 0.5230, loss: 0.1026
+2026-05-08 14:01:53,225 - mmdet - INFO - Iter [28200/120000]	lr: 1.000e-04, eta: 1 day, 15:50:53, time: 1.373, data_time: 0.020, memory: 37118, loss_mask: 0.0946, loss_texture: 0.0190, iou: 0.5952, iou_t0: 0.5987, iou_t1: 0.6272, iou_t2: 0.5691, iou_t3: 0.5682, iou_t4: 0.6023, iou_t5: 0.5549, loss: 0.1137
+2026-05-08 14:02:27,238 - mmdet - INFO - Iter [28225/120000]	lr: 1.000e-04, eta: 1 day, 15:47:50, time: 1.361, data_time: 0.020, memory: 37118, loss_mask: 0.0859, loss_texture: 0.0171, iou: 0.6191, iou_t0: 0.6501, iou_t1: 0.6988, iou_t2: 0.6012, iou_t3: 0.4804, iou_t4: 0.6902, iou_t5: 0.6418, loss: 0.1030
+2026-05-08 14:03:01,024 - mmdet - INFO - Iter [28250/120000]	lr: 1.000e-04, eta: 1 day, 15:44:43, time: 1.351, data_time: 0.020, memory: 37118, loss_mask: 0.1013, loss_texture: 0.0198, iou: 0.6337, iou_t0: 0.5967, iou_t1: 0.6291, iou_t2: 0.6129, iou_t3: 0.5726, iou_t4: 0.6193, iou_t5: 0.7139, loss: 0.1211
+2026-05-08 14:03:35,684 - mmdet - INFO - Iter [28275/120000]	lr: 1.000e-04, eta: 1 day, 15:42:03, time: 1.386, data_time: 0.019, memory: 37118, loss_mask: 0.1022, loss_texture: 0.0202, iou: 0.6326, iou_t0: 0.6040, iou_t1: 0.6507, iou_t2: 0.6257, iou_t3: 0.7190, iou_t4: 0.6815, iou_t5: 0.5983, loss: 0.1224
+2026-05-08 14:04:09,939 - mmdet - INFO - Iter [28300/120000]	lr: 1.000e-04, eta: 1 day, 15:39:13, time: 1.370, data_time: 0.020, memory: 37118, loss_mask: 0.0939, loss_texture: 0.0190, iou: 0.6162, iou_t0: 0.5992, iou_t1: 0.5706, iou_t2: 0.7092, iou_t3: 0.6162, iou_t4: 0.5765, iou_t5: 0.5868, loss: 0.1129
+2026-05-08 14:04:44,581 - mmdet - INFO - Iter [28325/120000]	lr: 1.000e-04, eta: 1 day, 15:36:36, time: 1.386, data_time: 0.020, memory: 37118, loss_mask: 0.0904, loss_texture: 0.0181, iou: 0.6278, iou_t0: 0.6747, iou_t1: 0.6474, iou_t2: 0.6330, iou_t3: 0.7151, iou_t4: 0.5587, iou_t5: 0.5485, loss: 0.1085
+2026-05-08 14:05:19,116 - mmdet - INFO - Iter [28350/120000]	lr: 1.000e-04, eta: 1 day, 15:33:58, time: 1.381, data_time: 0.020, memory: 37118, loss_mask: 0.1019, loss_texture: 0.0200, iou: 0.6459, iou_t0: 0.6067, iou_t1: 0.6957, iou_t2: 0.6401, iou_t3: 0.5826, iou_t4: 0.6045, iou_t5: 0.6432, loss: 0.1219
+2026-05-08 14:05:52,901 - mmdet - INFO - Iter [28375/120000]	lr: 1.000e-04, eta: 1 day, 15:31:02, time: 1.351, data_time: 0.020, memory: 37118, loss_mask: 0.0934, loss_texture: 0.0182, iou: 0.6092, iou_t0: 0.5892, iou_t1: 0.6489, iou_t2: 0.5698, iou_t3: 0.6461, iou_t4: 0.6645, iou_t5: 0.5491, loss: 0.1116
+2026-05-08 14:06:26,774 - mmdet - INFO - Iter [28400/120000]	lr: 1.000e-04, eta: 1 day, 15:28:10, time: 1.355, data_time: 0.020, memory: 37118, loss_mask: 0.0977, loss_texture: 0.0194, iou: 0.6246, iou_t0: 0.6863, iou_t1: 0.5495, iou_t2: 0.6053, iou_t3: 0.6314, iou_t4: 0.7020, iou_t5: 0.5942, loss: 0.1171
+2026-05-08 14:07:00,903 - mmdet - INFO - Iter [28425/120000]	lr: 1.000e-04, eta: 1 day, 15:25:27, time: 1.365, data_time: 0.020, memory: 37118, loss_mask: 0.0997, loss_texture: 0.0198, iou: 0.6203, iou_t0: 0.5896, iou_t1: 0.6691, iou_t2: 0.6209, iou_t3: 0.6335, iou_t4: 0.5433, iou_t5: 0.6692, loss: 0.1195
+2026-05-08 14:07:34,859 - mmdet - INFO - Iter [28450/120000]	lr: 1.000e-04, eta: 1 day, 15:22:41, time: 1.358, data_time: 0.020, memory: 37118, loss_mask: 0.0812, loss_texture: 0.0168, iou: 0.6351, iou_t0: 0.6709, iou_t1: 0.6258, iou_t2: 0.6076, iou_t3: 0.7073, iou_t4: 0.5988, iou_t5: 0.6582, loss: 0.0980
+2026-05-08 14:08:09,648 - mmdet - INFO - Iter [28475/120000]	lr: 1.000e-04, eta: 1 day, 15:20:19, time: 1.392, data_time: 0.020, memory: 37118, loss_mask: 0.0977, loss_texture: 0.0193, iou: 0.6538, iou_t0: 0.7231, iou_t1: 0.5624, iou_t2: 0.6590, iou_t3: 0.6500, iou_t4: 0.7228, iou_t5: 0.5955, loss: 0.1170
+2026-05-08 14:08:42,912 - mmdet - INFO - 
+--- Val evaluation at iter 28500 ---
+2026-05-08 14:09:58,893 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 87.90       | 93.28       |
+| building   | 45.91       | 59.08       |
+| Summary    | mIoU: 66.90 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 14:10:00,318 - mmdet - INFO - Iter [28500/120000]	lr: 1.000e-04, eta: 1 day, 15:17:19, time: 1.331, data_time: 0.020, memory: 37118, val/mIoU: 0.6690, val/IoU.building: 0.4591, val/IoU.background: 0.8790, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0917, loss_texture: 0.0175, iou: 0.6075, iou_t0: 0.5970, iou_t1: 0.5984, iou_t2: 0.6967, iou_t3: 0.7175, iou_t4: 0.5443, iou_t5: 0.5745, loss: 0.1092
+2026-05-08 14:10:34,151 - mmdet - INFO - Iter [28525/120000]	lr: 1.000e-04, eta: 1 day, 15:48:03, time: 4.450, data_time: 3.117, memory: 37118, loss_mask: 0.0883, loss_texture: 0.0180, iou: 0.6164, iou_t0: 0.5345, iou_t1: 0.6976, iou_t2: 0.6012, iou_t3: 0.6202, iou_t4: 0.6411, iou_t5: 0.6147, loss: 0.1062
+2026-05-08 14:11:08,214 - mmdet - INFO - Iter [28550/120000]	lr: 1.000e-04, eta: 1 day, 15:45:13, time: 1.362, data_time: 0.020, memory: 37118, loss_mask: 0.0981, loss_texture: 0.0196, iou: 0.5909, iou_t0: 0.5814, iou_t1: 0.6595, iou_t2: 0.6060, iou_t3: 0.6023, iou_t4: 0.5751, iou_t5: 0.6012, loss: 0.1176
+2026-05-08 14:11:42,209 - mmdet - INFO - Iter [28575/120000]	lr: 1.000e-04, eta: 1 day, 15:42:23, time: 1.360, data_time: 0.020, memory: 37118, loss_mask: 0.0905, loss_texture: 0.0179, iou: 0.5917, iou_t0: 0.6172, iou_t1: 0.6192, iou_t2: 0.5908, iou_t3: 0.6015, iou_t4: 0.5194, iou_t5: 0.6278, loss: 0.1083
+2026-05-08 14:12:16,436 - mmdet - INFO - Iter [28600/120000]	lr: 1.000e-04, eta: 1 day, 15:39:40, time: 1.369, data_time: 0.020, memory: 37118, loss_mask: 0.1014, loss_texture: 0.0199, iou: 0.6245, iou_t0: 0.6039, iou_t1: 0.6093, iou_t2: 0.6245, iou_t3: 0.6448, iou_t4: 0.6777, iou_t5: 0.6885, loss: 0.1214
+2026-05-08 14:12:49,979 - mmdet - INFO - Iter [28625/120000]	lr: 1.000e-04, eta: 1 day, 15:36:42, time: 1.342, data_time: 0.020, memory: 37118, loss_mask: 0.0941, loss_texture: 0.0186, iou: 0.5827, iou_t0: 0.5135, iou_t1: 0.6296, iou_t2: 0.6347, iou_t3: 0.6094, iou_t4: 0.5975, iou_t5: 0.5297, loss: 0.1126
+2026-05-08 14:13:24,110 - mmdet - INFO - Iter [28650/120000]	lr: 1.000e-04, eta: 1 day, 15:34:01, time: 1.365, data_time: 0.020, memory: 37118, loss_mask: 0.0990, loss_texture: 0.0199, iou: 0.6277, iou_t0: 0.6327, iou_t1: 0.6129, iou_t2: 0.6848, iou_t3: 0.6024, iou_t4: 0.6124, iou_t5: 0.6425, loss: 0.1189
+2026-05-08 14:13:58,388 - mmdet - INFO - Iter [28675/120000]	lr: 1.000e-04, eta: 1 day, 15:31:25, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.1021, loss_texture: 0.0202, iou: 0.6361, iou_t0: 0.5678, iou_t1: 0.6764, iou_t2: 0.7044, iou_t3: 0.6473, iou_t4: 0.6095, iou_t5: 0.6580, loss: 0.1223
+2026-05-08 14:14:31,399 - mmdet - INFO - Iter [28700/120000]	lr: 1.000e-04, eta: 1 day, 15:28:20, time: 1.320, data_time: 0.020, memory: 37118, loss_mask: 0.0852, loss_texture: 0.0170, iou: 0.5945, iou_t0: 0.6547, iou_t1: 0.6113, iou_t2: 0.6164, iou_t3: 0.6007, iou_t4: 0.5809, iou_t5: 0.5885, loss: 0.1023
+2026-05-08 14:15:06,233 - mmdet - INFO - Iter [28725/120000]	lr: 1.000e-04, eta: 1 day, 15:26:01, time: 1.393, data_time: 0.021, memory: 37118, loss_mask: 0.1011, loss_texture: 0.0187, iou: 0.6126, iou_t0: 0.6265, iou_t1: 0.5364, iou_t2: 0.6449, iou_t3: 0.5351, iou_t4: 0.6587, iou_t5: 0.6614, loss: 0.1199
+2026-05-08 14:15:41,052 - mmdet - INFO - Iter [28750/120000]	lr: 1.000e-04, eta: 1 day, 15:23:43, time: 1.393, data_time: 0.020, memory: 37118, loss_mask: 0.1001, loss_texture: 0.0193, iou: 0.6474, iou_t0: 0.6421, iou_t1: 0.6087, iou_t2: 0.6731, iou_t3: 0.5949, iou_t4: 0.6254, iou_t5: 0.6525, loss: 0.1194
+2026-05-08 14:16:14,617 - mmdet - INFO - Iter [28775/120000]	lr: 1.000e-04, eta: 1 day, 15:20:57, time: 1.343, data_time: 0.020, memory: 37118, loss_mask: 0.0906, loss_texture: 0.0179, iou: 0.6055, iou_t0: 0.5747, iou_t1: 0.5636, iou_t2: 0.6992, iou_t3: 0.5992, iou_t4: 0.6528, iou_t5: 0.5792, loss: 0.1085
+2026-05-08 14:16:48,723 - mmdet - INFO - Iter [28800/120000]	lr: 1.000e-04, eta: 1 day, 15:18:25, time: 1.364, data_time: 0.020, memory: 37118, loss_mask: 0.0958, loss_texture: 0.0192, iou: 0.6449, iou_t0: 0.7011, iou_t1: 0.5837, iou_t2: 0.6588, iou_t3: 0.6234, iou_t4: 0.6267, iou_t5: 0.6481, loss: 0.1150
+2026-05-08 14:17:22,861 - mmdet - INFO - Iter [28825/120000]	lr: 1.000e-04, eta: 1 day, 15:15:55, time: 1.366, data_time: 0.020, memory: 37118, loss_mask: 0.0963, loss_texture: 0.0190, iou: 0.6203, iou_t0: 0.6803, iou_t1: 0.5788, iou_t2: 0.6925, iou_t3: 0.6303, iou_t4: 0.6596, iou_t5: 0.5666, loss: 0.1152
+2026-05-08 14:17:56,313 - mmdet - INFO - Iter [28850/120000]	lr: 1.000e-04, eta: 1 day, 15:13:11, time: 1.338, data_time: 0.020, memory: 37118, loss_mask: 0.0948, loss_texture: 0.0188, iou: 0.6234, iou_t0: 0.6670, iou_t1: 0.5826, iou_t2: 0.6122, iou_t3: 0.6673, iou_t4: 0.6434, iou_t5: 0.6000, loss: 0.1136
+2026-05-08 14:18:30,054 - mmdet - INFO - Iter [28875/120000]	lr: 1.000e-04, eta: 1 day, 15:10:35, time: 1.350, data_time: 0.020, memory: 37118, loss_mask: 0.1065, loss_texture: 0.0211, iou: 0.6322, iou_t0: 0.7058, iou_t1: 0.5219, iou_t2: 0.7153, iou_t3: 0.6196, iou_t4: 0.6006, iou_t5: 0.7049, loss: 0.1276
+2026-05-08 14:19:03,790 - mmdet - INFO - Iter [28900/120000]	lr: 1.000e-04, eta: 1 day, 15:08:00, time: 1.349, data_time: 0.020, memory: 37118, loss_mask: 0.0960, loss_texture: 0.0191, iou: 0.6085, iou_t0: 0.6131, iou_t1: 0.6560, iou_t2: 0.5980, iou_t3: 0.6365, iou_t4: 0.5589, iou_t5: 0.5707, loss: 0.1151
+2026-05-08 14:19:36,591 - mmdet - INFO - Iter [28925/120000]	lr: 1.000e-04, eta: 1 day, 15:05:06, time: 1.312, data_time: 0.021, memory: 37118, loss_mask: 0.0946, loss_texture: 0.0185, iou: 0.6017, iou_t0: 0.6787, iou_t1: 0.5803, iou_t2: 0.5649, iou_t3: 0.5680, iou_t4: 0.5730, iou_t5: 0.6152, loss: 0.1131
+2026-05-08 14:20:11,341 - mmdet - INFO - Iter [28950/120000]	lr: 1.000e-04, eta: 1 day, 15:02:58, time: 1.390, data_time: 0.020, memory: 37118, loss_mask: 0.1077, loss_texture: 0.0209, iou: 0.6304, iou_t0: 0.6453, iou_t1: 0.6795, iou_t2: 0.6812, iou_t3: 0.6480, iou_t4: 0.6221, iou_t5: 0.5392, loss: 0.1286
+2026-05-08 14:20:44,883 - mmdet - INFO - Iter [28975/120000]	lr: 1.000e-04, eta: 1 day, 15:00:23, time: 1.342, data_time: 0.020, memory: 37118, loss_mask: 0.1009, loss_texture: 0.0195, iou: 0.6050, iou_t0: 0.6115, iou_t1: 0.5516, iou_t2: 0.6670, iou_t3: 0.6627, iou_t4: 0.5860, iou_t5: 0.5857, loss: 0.1204
+2026-05-08 14:21:18,981 - mmdet - INFO - 
+--- Val evaluation at iter 29000 ---
+2026-05-08 14:22:33,541 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 90.92       | 93.28       |
+| building   | 52.61       | 59.08       |
+| Summary    | mIoU: 71.76 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 14:22:36,184 - mmdet - INFO - ★ New best mIoU: 71.76% (prev: 69.73%, Δ=+2.03%) → saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/best_model.pth
+2026-05-08 14:22:36,189 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 14:22:36,189 - mmdet - INFO - Iter [29000/120000]	lr: 1.000e-04, eta: 1 day, 14:58:03, time: 1.364, data_time: 0.020, memory: 37118, val/mIoU: 0.7176, val/IoU.building: 0.5261, val/IoU.background: 0.9092, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0930, loss_texture: 0.0182, iou: 0.6383, iou_t0: 0.5751, iou_t1: 0.6715, iou_t2: 0.6651, iou_t3: 0.6178, iou_t4: 0.6247, iou_t5: 0.6540, loss: 0.1112
+2026-05-08 14:23:09,622 - mmdet - INFO - Iter [29025/120000]	lr: 1.000e-04, eta: 1 day, 15:24:34, time: 4.426, data_time: 3.109, memory: 37118, loss_mask: 0.0993, loss_texture: 0.0192, iou: 0.6396, iou_t0: 0.7286, iou_t1: 0.6828, iou_t2: 0.5313, iou_t3: 0.6672, iou_t4: 0.5684, iou_t5: 0.6265, loss: 0.1186
+2026-05-08 14:23:44,826 - mmdet - INFO - Iter [29050/120000]	lr: 1.000e-04, eta: 1 day, 15:22:30, time: 1.408, data_time: 0.020, memory: 37118, loss_mask: 0.1073, loss_texture: 0.0193, iou: 0.6210, iou_t0: 0.5765, iou_t1: 0.5969, iou_t2: 0.5994, iou_t3: 0.5953, iou_t4: 0.6339, iou_t5: 0.5684, loss: 0.1266
+2026-05-08 14:24:18,767 - mmdet - INFO - Iter [29075/120000]	lr: 1.000e-04, eta: 1 day, 15:19:59, time: 1.358, data_time: 0.019, memory: 37118, loss_mask: 0.1039, loss_texture: 0.0202, iou: 0.6343, iou_t0: 0.6316, iou_t1: 0.6130, iou_t2: 0.7106, iou_t3: 0.6045, iou_t4: 0.6900, iou_t5: 0.6426, loss: 0.1241
+2026-05-08 14:24:53,446 - mmdet - INFO - Iter [29100/120000]	lr: 1.000e-04, eta: 1 day, 15:17:46, time: 1.387, data_time: 0.020, memory: 37118, loss_mask: 0.1060, loss_texture: 0.0205, iou: 0.6118, iou_t0: 0.4675, iou_t1: 0.6168, iou_t2: 0.6079, iou_t3: 0.5823, iou_t4: 0.6220, iou_t5: 0.6943, loss: 0.1265
+2026-05-08 14:25:27,188 - mmdet - INFO - Iter [29125/120000]	lr: 1.000e-04, eta: 1 day, 15:15:13, time: 1.350, data_time: 0.020, memory: 37118, loss_mask: 0.0847, loss_texture: 0.0166, iou: 0.6257, iou_t0: 0.6513, iou_t1: 0.6856, iou_t2: 0.5707, iou_t3: 0.6379, iou_t4: 0.5730, iou_t5: 0.5653, loss: 0.1013
+2026-05-08 14:26:01,340 - mmdet - INFO - Iter [29150/120000]	lr: 1.000e-04, eta: 1 day, 15:12:51, time: 1.366, data_time: 0.020, memory: 37118, loss_mask: 0.1020, loss_texture: 0.0202, iou: 0.6284, iou_t0: 0.6228, iou_t1: 0.6432, iou_t2: 0.6462, iou_t3: 0.6126, iou_t4: 0.6477, iou_t5: 0.6557, loss: 0.1221
+2026-05-08 14:26:36,455 - mmdet - INFO - Iter [29175/120000]	lr: 1.000e-04, eta: 1 day, 15:10:51, time: 1.405, data_time: 0.019, memory: 37118, loss_mask: 0.1031, loss_texture: 0.0202, iou: 0.6338, iou_t0: 0.6693, iou_t1: 0.6901, iou_t2: 0.7129, iou_t3: 0.5205, iou_t4: 0.6420, iou_t5: 0.5531, loss: 0.1233
+2026-05-08 14:27:10,338 - mmdet - INFO - Iter [29200/120000]	lr: 1.000e-04, eta: 1 day, 15:08:25, time: 1.355, data_time: 0.020, memory: 37118, loss_mask: 0.1151, loss_texture: 0.0203, iou: 0.6261, iou_t0: 0.6231, iou_t1: 0.6440, iou_t2: 0.6282, iou_t3: 0.6192, iou_t4: 0.6925, iou_t5: 0.5796, loss: 0.1354
+2026-05-08 14:27:43,758 - mmdet - INFO - Iter [29225/120000]	lr: 1.000e-04, eta: 1 day, 15:05:51, time: 1.337, data_time: 0.021, memory: 37118, loss_mask: 0.1007, loss_texture: 0.0198, iou: 0.6378, iou_t0: 0.6095, iou_t1: 0.6770, iou_t2: 0.6939, iou_t3: 0.6156, iou_t4: 0.6268, iou_t5: 0.6411, loss: 0.1205
+2026-05-08 14:28:16,946 - mmdet - INFO - Iter [29250/120000]	lr: 1.000e-04, eta: 1 day, 15:03:13, time: 1.328, data_time: 0.020, memory: 37118, loss_mask: 0.0984, loss_texture: 0.0184, iou: 0.6110, iou_t0: 0.6962, iou_t1: 0.5208, iou_t2: 0.5892, iou_t3: 0.6043, iou_t4: 0.6825, iou_t5: 0.6091, loss: 0.1168
+2026-05-08 14:28:51,201 - mmdet - INFO - Iter [29275/120000]	lr: 1.000e-04, eta: 1 day, 15:00:59, time: 1.370, data_time: 0.020, memory: 37118, loss_mask: 0.1090, loss_texture: 0.0205, iou: 0.6079, iou_t0: 0.5143, iou_t1: 0.6700, iou_t2: 0.6907, iou_t3: 0.6324, iou_t4: 0.6474, iou_t5: 0.5286, loss: 0.1295
+2026-05-08 14:29:25,535 - mmdet - INFO - Iter [29300/120000]	lr: 1.000e-04, eta: 1 day, 14:58:48, time: 1.373, data_time: 0.020, memory: 37118, loss_mask: 0.1047, loss_texture: 0.0206, iou: 0.6298, iou_t0: 0.5864, iou_t1: 0.6640, iou_t2: 0.6410, iou_t3: 0.5355, iou_t4: 0.6757, iou_t5: 0.6280, loss: 0.1253
+2026-05-08 14:29:59,229 - mmdet - INFO - Iter [29325/120000]	lr: 1.000e-04, eta: 1 day, 14:56:25, time: 1.348, data_time: 0.020, memory: 37118, loss_mask: 0.1014, loss_texture: 0.0198, iou: 0.6179, iou_t0: 0.5518, iou_t1: 0.5534, iou_t2: 0.6327, iou_t3: 0.6007, iou_t4: 0.6035, iou_t5: 0.6348, loss: 0.1212
+2026-05-08 14:30:32,940 - mmdet - INFO - Iter [29350/120000]	lr: 1.000e-04, eta: 1 day, 14:54:04, time: 1.348, data_time: 0.020, memory: 37118, loss_mask: 0.0956, loss_texture: 0.0184, iou: 0.5846, iou_t0: 0.6181, iou_t1: 0.5984, iou_t2: 0.6289, iou_t3: 0.6252, iou_t4: 0.5651, iou_t5: 0.4438, loss: 0.1140
+2026-05-08 14:31:06,505 - mmdet - INFO - Iter [29375/120000]	lr: 1.000e-04, eta: 1 day, 14:51:40, time: 1.343, data_time: 0.020, memory: 37118, loss_mask: 0.0867, loss_texture: 0.0173, iou: 0.6084, iou_t0: 0.6327, iou_t1: 0.6074, iou_t2: 0.5978, iou_t3: 0.6262, iou_t4: 0.6546, iou_t5: 0.5682, loss: 0.1040
+2026-05-08 14:31:40,510 - mmdet - INFO - Iter [29400/120000]	lr: 1.000e-04, eta: 1 day, 14:49:27, time: 1.360, data_time: 0.020, memory: 37118, loss_mask: 0.0993, loss_texture: 0.0199, iou: 0.6059, iou_t0: 0.6487, iou_t1: 0.6183, iou_t2: 0.6642, iou_t3: 0.5355, iou_t4: 0.5838, iou_t5: 0.5582, loss: 0.1193
+2026-05-08 14:32:14,722 - mmdet - INFO - Iter [29425/120000]	lr: 1.000e-04, eta: 1 day, 14:47:20, time: 1.368, data_time: 0.020, memory: 37118, loss_mask: 0.1065, loss_texture: 0.0209, iou: 0.6420, iou_t0: 0.6532, iou_t1: 0.6142, iou_t2: 0.6677, iou_t3: 0.6819, iou_t4: 0.5981, iou_t5: 0.6039, loss: 0.1274
+2026-05-08 14:32:48,382 - mmdet - INFO - Iter [29450/120000]	lr: 1.000e-04, eta: 1 day, 14:45:02, time: 1.346, data_time: 0.020, memory: 37118, loss_mask: 0.0925, loss_texture: 0.0186, iou: 0.5871, iou_t0: 0.5747, iou_t1: 0.4922, iou_t2: 0.7574, iou_t3: 0.5956, iou_t4: 0.5288, iou_t5: 0.5746, loss: 0.1111
+2026-05-08 14:33:22,922 - mmdet - INFO - Iter [29475/120000]	lr: 1.000e-04, eta: 1 day, 14:43:03, time: 1.382, data_time: 0.020, memory: 37118, loss_mask: 0.1000, loss_texture: 0.0199, iou: 0.6416, iou_t0: 0.5924, iou_t1: 0.6519, iou_t2: 0.6433, iou_t3: 0.6238, iou_t4: 0.6621, iou_t5: 0.6702, loss: 0.1199
+2026-05-08 14:33:56,266 - mmdet - INFO - 
+--- Val evaluation at iter 29500 ---
+2026-05-08 14:35:10,966 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 90.92       | 93.28       |
+| building   | 52.89       | 59.08       |
+| Summary    | mIoU: 71.91 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 14:35:13,483 - mmdet - INFO - ★ New best mIoU: 71.91% (prev: 71.76%, Δ=+0.14%) → saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/best_model.pth
+2026-05-08 14:35:13,488 - mmdet - INFO - Iter [29500/120000]	lr: 1.000e-04, eta: 1 day, 14:40:41, time: 1.334, data_time: 0.020, memory: 37118, val/mIoU: 0.7191, val/IoU.building: 0.5289, val/IoU.background: 0.9092, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0866, loss_texture: 0.0177, iou: 0.5803, iou_t0: 0.5644, iou_t1: 0.6147, iou_t2: 0.5002, iou_t3: 0.5174, iou_t4: 0.6946, iou_t5: 0.5226, loss: 0.1043
+2026-05-08 14:35:47,418 - mmdet - INFO - Iter [29525/120000]	lr: 1.000e-04, eta: 1 day, 15:04:15, time: 4.446, data_time: 3.109, memory: 37118, loss_mask: 0.0978, loss_texture: 0.0195, iou: 0.6244, iou_t0: 0.5755, iou_t1: 0.6836, iou_t2: 0.6112, iou_t3: 0.6507, iou_t4: 0.5375, iou_t5: 0.5719, loss: 0.1173
+2026-05-08 14:36:21,726 - mmdet - INFO - Iter [29550/120000]	lr: 1.000e-04, eta: 1 day, 15:02:06, time: 1.372, data_time: 0.020, memory: 37118, loss_mask: 0.0971, loss_texture: 0.0193, iou: 0.6387, iou_t0: 0.6803, iou_t1: 0.6696, iou_t2: 0.5681, iou_t3: 0.6558, iou_t4: 0.6476, iou_t5: 0.5493, loss: 0.1164
+2026-05-08 14:36:55,375 - mmdet - INFO - Iter [29575/120000]	lr: 1.000e-04, eta: 1 day, 14:59:44, time: 1.346, data_time: 0.020, memory: 37118, loss_mask: 0.0963, loss_texture: 0.0190, iou: 0.6247, iou_t0: 0.6279, iou_t1: 0.5925, iou_t2: 0.7301, iou_t3: 0.5992, iou_t4: 0.5188, iou_t5: 0.6039, loss: 0.1153
+2026-05-08 14:37:28,755 - mmdet - INFO - Iter [29600/120000]	lr: 1.000e-04, eta: 1 day, 14:57:19, time: 1.335, data_time: 0.020, memory: 37118, loss_mask: 0.0948, loss_texture: 0.0181, iou: 0.6460, iou_t0: 0.6479, iou_t1: 0.6933, iou_t2: 0.6307, iou_t3: 0.6966, iou_t4: 0.6083, iou_t5: 0.5514, loss: 0.1128
+2026-05-08 14:38:02,955 - mmdet - INFO - Iter [29625/120000]	lr: 1.000e-04, eta: 1 day, 14:55:11, time: 1.368, data_time: 0.020, memory: 37118, loss_mask: 0.1136, loss_texture: 0.0205, iou: 0.6318, iou_t0: 0.5568, iou_t1: 0.6279, iou_t2: 0.6925, iou_t3: 0.6274, iou_t4: 0.6116, iou_t5: 0.6424, loss: 0.1341
+2026-05-08 14:38:37,151 - mmdet - INFO - Iter [29650/120000]	lr: 1.000e-04, eta: 1 day, 14:53:03, time: 1.368, data_time: 0.020, memory: 37118, loss_mask: 0.0950, loss_texture: 0.0192, iou: 0.6310, iou_t0: 0.6453, iou_t1: 0.6287, iou_t2: 0.6476, iou_t3: 0.5586, iou_t4: 0.6986, iou_t5: 0.6692, loss: 0.1143
+2026-05-08 14:39:11,116 - mmdet - INFO - Iter [29675/120000]	lr: 1.000e-04, eta: 1 day, 14:50:52, time: 1.359, data_time: 0.020, memory: 37118, loss_mask: 0.1015, loss_texture: 0.0204, iou: 0.6103, iou_t0: 0.6311, iou_t1: 0.5984, iou_t2: 0.5386, iou_t3: 0.6896, iou_t4: 0.6400, iou_t5: 0.5503, loss: 0.1219
+2026-05-08 14:39:45,400 - mmdet - INFO - Iter [29700/120000]	lr: 1.000e-04, eta: 1 day, 14:48:49, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.1014, loss_texture: 0.0201, iou: 0.6133, iou_t0: 0.6590, iou_t1: 0.6127, iou_t2: 0.6482, iou_t3: 0.7498, iou_t4: 0.5580, iou_t5: 0.6246, loss: 0.1216
+2026-05-08 14:40:19,883 - mmdet - INFO - Iter [29725/120000]	lr: 1.000e-04, eta: 1 day, 14:46:50, time: 1.379, data_time: 0.020, memory: 37118, loss_mask: 0.0957, loss_texture: 0.0195, iou: 0.6247, iou_t0: 0.5689, iou_t1: 0.6290, iou_t2: 0.6326, iou_t3: 0.6243, iou_t4: 0.6235, iou_t5: 0.6995, loss: 0.1153
+2026-05-08 14:40:53,640 - mmdet - INFO - Iter [29750/120000]	lr: 1.000e-04, eta: 1 day, 14:44:38, time: 1.350, data_time: 0.020, memory: 37118, loss_mask: 0.0882, loss_texture: 0.0179, iou: 0.6090, iou_t0: 0.6508, iou_t1: 0.6111, iou_t2: 0.6477, iou_t3: 0.5702, iou_t4: 0.6147, iou_t5: 0.6289, loss: 0.1061
+2026-05-08 14:41:29,341 - mmdet - INFO - Iter [29775/120000]	lr: 1.000e-04, eta: 1 day, 14:43:04, time: 1.428, data_time: 0.020, memory: 37118, loss_mask: 0.1004, loss_texture: 0.0199, iou: 0.6331, iou_t0: 0.6727, iou_t1: 0.6446, iou_t2: 0.6032, iou_t3: 0.5686, iou_t4: 0.6028, iou_t5: 0.6435, loss: 0.1202
+2026-05-08 14:42:03,530 - mmdet - INFO - Iter [29800/120000]	lr: 1.000e-04, eta: 1 day, 14:41:02, time: 1.368, data_time: 0.019, memory: 37118, loss_mask: 0.0936, loss_texture: 0.0188, iou: 0.5894, iou_t0: 0.5552, iou_t1: 0.5736, iou_t2: 0.5873, iou_t3: 0.6311, iou_t4: 0.6074, iou_t5: 0.5895, loss: 0.1123
+2026-05-08 14:42:37,647 - mmdet - INFO - Iter [29825/120000]	lr: 1.000e-04, eta: 1 day, 14:38:59, time: 1.365, data_time: 0.020, memory: 37118, loss_mask: 0.0954, loss_texture: 0.0192, iou: 0.6102, iou_t0: 0.6641, iou_t1: 0.6750, iou_t2: 0.6703, iou_t3: 0.5693, iou_t4: 0.5625, iou_t5: 0.5443, loss: 0.1146
+2026-05-08 14:43:11,364 - mmdet - INFO - Iter [29850/120000]	lr: 1.000e-04, eta: 1 day, 14:36:51, time: 1.349, data_time: 0.020, memory: 37118, loss_mask: 0.0897, loss_texture: 0.0180, iou: 0.6094, iou_t0: 0.5887, iou_t1: 0.6446, iou_t2: 0.6745, iou_t3: 0.5785, iou_t4: 0.6023, iou_t5: 0.6089, loss: 0.1077
+2026-05-08 14:43:45,776 - mmdet - INFO - Iter [29875/120000]	lr: 1.000e-04, eta: 1 day, 14:34:56, time: 1.376, data_time: 0.019, memory: 37118, loss_mask: 0.0952, loss_texture: 0.0190, iou: 0.6347, iou_t0: 0.6178, iou_t1: 0.6150, iou_t2: 0.6855, iou_t3: 0.6847, iou_t4: 0.7069, iou_t5: 0.5898, loss: 0.1142
+2026-05-08 14:44:19,802 - mmdet - INFO - Iter [29900/120000]	lr: 1.000e-04, eta: 1 day, 14:32:54, time: 1.361, data_time: 0.020, memory: 37118, loss_mask: 0.0959, loss_texture: 0.0195, iou: 0.6015, iou_t0: 0.5844, iou_t1: 0.6728, iou_t2: 0.5262, iou_t3: 0.5056, iou_t4: 0.6069, iou_t5: 0.6260, loss: 0.1154
+2026-05-08 14:44:54,608 - mmdet - INFO - Iter [29925/120000]	lr: 1.000e-04, eta: 1 day, 14:31:08, time: 1.392, data_time: 0.020, memory: 37118, loss_mask: 0.1011, loss_texture: 0.0197, iou: 0.6374, iou_t0: 0.5796, iou_t1: 0.7404, iou_t2: 0.6252, iou_t3: 0.6888, iou_t4: 0.6051, iou_t5: 0.5621, loss: 0.1208
+2026-05-08 14:45:28,524 - mmdet - INFO - Iter [29950/120000]	lr: 1.000e-04, eta: 1 day, 14:29:06, time: 1.357, data_time: 0.019, memory: 37118, loss_mask: 0.0871, loss_texture: 0.0170, iou: 0.6008, iou_t0: 0.5840, iou_t1: 0.6141, iou_t2: 0.6030, iou_t3: 0.6847, iou_t4: 0.5152, iou_t5: 0.6695, loss: 0.1041
+2026-05-08 14:46:02,841 - mmdet - INFO - Iter [29975/120000]	lr: 1.000e-04, eta: 1 day, 14:27:13, time: 1.373, data_time: 0.020, memory: 37118, loss_mask: 0.0995, loss_texture: 0.0201, iou: 0.6409, iou_t0: 0.6035, iou_t1: 0.6573, iou_t2: 0.6349, iou_t3: 0.7009, iou_t4: 0.6320, iou_t5: 0.5848, loss: 0.1196
+2026-05-08 14:46:36,121 - mmdet - INFO - 
+--- Val evaluation at iter 30000 ---
+2026-05-08 14:47:51,381 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 88.77       | 93.28       |
+| building   | 47.90       | 59.08       |
+| Summary    | mIoU: 68.33 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 14:47:52,689 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 14:47:52,689 - mmdet - INFO - Iter [30000/120000]	lr: 1.000e-04, eta: 1 day, 14:25:02, time: 1.331, data_time: 0.020, memory: 37118, val/mIoU: 0.6833, val/IoU.building: 0.4790, val/IoU.background: 0.8877, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0852, loss_texture: 0.0168, iou: 0.6396, iou_t0: 0.6769, iou_t1: 0.6349, iou_t2: 0.6780, iou_t3: 0.6544, iou_t4: 0.7000, iou_t5: 0.6056, loss: 0.1020
+2026-05-08 14:48:26,885 - mmdet - INFO - Iter [30025/120000]	lr: 1.000e-04, eta: 1 day, 14:45:58, time: 4.431, data_time: 3.083, memory: 37118, loss_mask: 0.1015, loss_texture: 0.0207, iou: 0.6338, iou_t0: 0.6716, iou_t1: 0.7107, iou_t2: 0.6274, iou_t3: 0.5307, iou_t4: 0.7071, iou_t5: 0.6001, loss: 0.1222
+2026-05-08 14:49:01,031 - mmdet - INFO - Iter [30050/120000]	lr: 1.000e-04, eta: 1 day, 14:43:57, time: 1.366, data_time: 0.020, memory: 37118, loss_mask: 0.0964, loss_texture: 0.0195, iou: 0.6084, iou_t0: 0.6387, iou_t1: 0.5922, iou_t2: 0.5871, iou_t3: 0.5914, iou_t4: 0.5889, iou_t5: 0.5852, loss: 0.1159
+2026-05-08 14:49:34,487 - mmdet - INFO - Iter [30075/120000]	lr: 1.000e-04, eta: 1 day, 14:41:44, time: 1.338, data_time: 0.019, memory: 37118, loss_mask: 0.0903, loss_texture: 0.0184, iou: 0.6009, iou_t0: 0.6292, iou_t1: 0.5899, iou_t2: 0.6348, iou_t3: 0.6282, iou_t4: 0.5695, iou_t5: 0.6300, loss: 0.1087
+2026-05-08 14:50:07,870 - mmdet - INFO - Iter [30100/120000]	lr: 1.000e-04, eta: 1 day, 14:39:32, time: 1.335, data_time: 0.020, memory: 37118, loss_mask: 0.0860, loss_texture: 0.0174, iou: 0.6300, iou_t0: 0.6478, iou_t1: 0.4898, iou_t2: 0.6540, iou_t3: 0.6629, iou_t4: 0.5743, iou_t5: 0.6450, loss: 0.1034
+2026-05-08 14:50:42,465 - mmdet - INFO - Iter [30125/120000]	lr: 1.000e-04, eta: 1 day, 14:37:41, time: 1.384, data_time: 0.021, memory: 37118, loss_mask: 0.1031, loss_texture: 0.0207, iou: 0.6356, iou_t0: 0.5359, iou_t1: 0.6333, iou_t2: 0.5949, iou_t3: 0.6547, iou_t4: 0.7290, iou_t5: 0.6441, loss: 0.1238
+2026-05-08 14:51:16,196 - mmdet - INFO - Iter [30150/120000]	lr: 1.000e-04, eta: 1 day, 14:35:36, time: 1.349, data_time: 0.020, memory: 37118, loss_mask: 0.0847, loss_texture: 0.0165, iou: 0.5868, iou_t0: 0.4599, iou_t1: 0.5823, iou_t2: 0.6065, iou_t3: 0.6991, iou_t4: 0.6312, iou_t5: 0.6044, loss: 0.1012
+2026-05-08 14:51:50,307 - mmdet - INFO - Iter [30175/120000]	lr: 1.000e-04, eta: 1 day, 14:33:38, time: 1.364, data_time: 0.019, memory: 37118, loss_mask: 0.0951, loss_texture: 0.0192, iou: 0.6432, iou_t0: 0.6222, iou_t1: 0.7390, iou_t2: 0.5650, iou_t3: 0.6503, iou_t4: 0.6041, iou_t5: 0.6922, loss: 0.1143
+2026-05-08 14:52:24,285 - mmdet - INFO - Iter [30200/120000]	lr: 1.000e-04, eta: 1 day, 14:31:39, time: 1.359, data_time: 0.020, memory: 37118, loss_mask: 0.0895, loss_texture: 0.0179, iou: 0.5903, iou_t0: 0.5622, iou_t1: 0.6017, iou_t2: 0.4580, iou_t3: 0.6133, iou_t4: 0.6265, iou_t5: 0.6573, loss: 0.1074
+2026-05-08 14:52:58,100 - mmdet - INFO - Iter [30225/120000]	lr: 1.000e-04, eta: 1 day, 14:29:38, time: 1.353, data_time: 0.020, memory: 37118, loss_mask: 0.0881, loss_texture: 0.0178, iou: 0.6303, iou_t0: 0.7337, iou_t1: 0.5768, iou_t2: 0.6200, iou_t3: 0.6557, iou_t4: 0.6623, iou_t5: 0.6034, loss: 0.1059
+2026-05-08 14:53:32,393 - mmdet - INFO - Iter [30250/120000]	lr: 1.000e-04, eta: 1 day, 14:27:46, time: 1.372, data_time: 0.020, memory: 37118, loss_mask: 0.1167, loss_texture: 0.0211, iou: 0.6098, iou_t0: 0.5824, iou_t1: 0.6437, iou_t2: 0.6351, iou_t3: 0.5536, iou_t4: 0.6736, iou_t5: 0.4759, loss: 0.1378
+2026-05-08 14:54:07,179 - mmdet - INFO - Iter [30275/120000]	lr: 1.000e-04, eta: 1 day, 14:26:03, time: 1.391, data_time: 0.019, memory: 37118, loss_mask: 0.1203, loss_texture: 0.0225, iou: 0.6577, iou_t0: 0.6234, iou_t1: 0.6230, iou_t2: 0.6619, iou_t3: 0.6614, iou_t4: 0.6777, iou_t5: 0.6552, loss: 0.1428
+2026-05-08 14:54:41,009 - mmdet - INFO - Iter [30300/120000]	lr: 1.000e-04, eta: 1 day, 14:24:05, time: 1.353, data_time: 0.020, memory: 37118, loss_mask: 0.1006, loss_texture: 0.0200, iou: 0.6180, iou_t0: 0.5695, iou_t1: 0.5816, iou_t2: 0.5750, iou_t3: 0.6534, iou_t4: 0.6719, iou_t5: 0.6605, loss: 0.1206
+2026-05-08 14:55:15,377 - mmdet - INFO - Iter [30325/120000]	lr: 1.000e-04, eta: 1 day, 14:22:16, time: 1.375, data_time: 0.020, memory: 37118, loss_mask: 0.0981, loss_texture: 0.0196, iou: 0.6362, iou_t0: 0.5252, iou_t1: 0.6087, iou_t2: 0.5873, iou_t3: 0.7360, iou_t4: 0.6326, iou_t5: 0.6423, loss: 0.1177
+2026-05-08 14:55:49,358 - mmdet - INFO - Iter [30350/120000]	lr: 1.000e-04, eta: 1 day, 14:20:22, time: 1.359, data_time: 0.020, memory: 37118, loss_mask: 0.1000, loss_texture: 0.0192, iou: 0.6323, iou_t0: 0.5823, iou_t1: 0.6155, iou_t2: 0.6480, iou_t3: 0.6534, iou_t4: 0.7081, iou_t5: 0.6528, loss: 0.1192
+2026-05-08 14:56:23,535 - mmdet - INFO - Iter [30375/120000]	lr: 1.000e-04, eta: 1 day, 14:18:31, time: 1.367, data_time: 0.019, memory: 37118, loss_mask: 0.1021, loss_texture: 0.0197, iou: 0.6034, iou_t0: 0.5876, iou_t1: 0.7145, iou_t2: 0.5783, iou_t3: 0.6506, iou_t4: 0.5266, iou_t5: 0.5017, loss: 0.1218
+2026-05-08 14:56:57,978 - mmdet - INFO - Iter [30400/120000]	lr: 1.000e-04, eta: 1 day, 14:16:46, time: 1.378, data_time: 0.020, memory: 37118, loss_mask: 0.0980, loss_texture: 0.0194, iou: 0.6366, iou_t0: 0.6625, iou_t1: 0.6259, iou_t2: 0.6743, iou_t3: 0.6051, iou_t4: 0.6251, iou_t5: 0.5482, loss: 0.1174
+2026-05-08 14:57:32,110 - mmdet - INFO - Iter [30425/120000]	lr: 1.000e-04, eta: 1 day, 14:14:56, time: 1.365, data_time: 0.020, memory: 37118, loss_mask: 0.1013, loss_texture: 0.0188, iou: 0.6146, iou_t0: 0.6528, iou_t1: 0.5929, iou_t2: 0.5950, iou_t3: 0.6987, iou_t4: 0.6112, iou_t5: 0.5908, loss: 0.1201
+2026-05-08 14:58:05,644 - mmdet - INFO - Iter [30450/120000]	lr: 1.000e-04, eta: 1 day, 14:12:57, time: 1.341, data_time: 0.020, memory: 37118, loss_mask: 0.1047, loss_texture: 0.0191, iou: 0.6256, iou_t0: 0.5369, iou_t1: 0.5666, iou_t2: 0.6304, iou_t3: 0.7199, iou_t4: 0.6187, iou_t5: 0.6042, loss: 0.1239
+2026-05-08 14:58:39,026 - mmdet - INFO - Iter [30475/120000]	lr: 1.000e-04, eta: 1 day, 14:10:57, time: 1.335, data_time: 0.020, memory: 37118, loss_mask: 0.0932, loss_texture: 0.0187, iou: 0.6036, iou_t0: 0.6468, iou_t1: 0.5333, iou_t2: 0.6633, iou_t3: 0.6936, iou_t4: 0.4855, iou_t5: 0.5556, loss: 0.1119
+2026-05-08 14:59:12,678 - mmdet - INFO - 
+--- Val evaluation at iter 30500 ---
+2026-05-08 15:00:27,138 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 89.47       | 93.28       |
+| building   | 49.29       | 59.08       |
+| Summary    | mIoU: 69.38 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 15:00:28,448 - mmdet - INFO - Iter [30500/120000]	lr: 1.000e-04, eta: 1 day, 14:09:01, time: 1.346, data_time: 0.020, memory: 37118, val/mIoU: 0.6938, val/IoU.building: 0.4929, val/IoU.background: 0.8947, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0887, loss_texture: 0.0170, iou: 0.5750, iou_t0: 0.5755, iou_t1: 0.6738, iou_t2: 0.6444, iou_t3: 0.5915, iou_t4: 0.5579, iou_t5: 0.5546, loss: 0.1058
+2026-05-08 15:01:02,901 - mmdet - INFO - Iter [30525/120000]	lr: 1.000e-04, eta: 1 day, 14:27:47, time: 4.409, data_time: 3.051, memory: 37118, loss_mask: 0.1061, loss_texture: 0.0209, iou: 0.6363, iou_t0: 0.6210, iou_t1: 0.6318, iou_t2: 0.6848, iou_t3: 0.6683, iou_t4: 0.7078, iou_t5: 0.5350, loss: 0.1270
+2026-05-08 15:01:36,643 - mmdet - INFO - Iter [30550/120000]	lr: 1.000e-04, eta: 1 day, 14:25:48, time: 1.350, data_time: 0.020, memory: 37118, loss_mask: 0.0966, loss_texture: 0.0185, iou: 0.6110, iou_t0: 0.6545, iou_t1: 0.6640, iou_t2: 0.5735, iou_t3: 0.5984, iou_t4: 0.6115, iou_t5: 0.5542, loss: 0.1151
+2026-05-08 15:02:10,248 - mmdet - INFO - Iter [30575/120000]	lr: 1.000e-04, eta: 1 day, 14:23:48, time: 1.344, data_time: 0.020, memory: 37118, loss_mask: 0.0967, loss_texture: 0.0188, iou: 0.6142, iou_t0: 0.6425, iou_t1: 0.6251, iou_t2: 0.6003, iou_t3: 0.5609, iou_t4: 0.6937, iou_t5: 0.5435, loss: 0.1154
+2026-05-08 15:02:43,762 - mmdet - INFO - Iter [30600/120000]	lr: 1.000e-04, eta: 1 day, 14:21:48, time: 1.341, data_time: 0.020, memory: 37118, loss_mask: 0.0942, loss_texture: 0.0187, iou: 0.6224, iou_t0: 0.6712, iou_t1: 0.6592, iou_t2: 0.6468, iou_t3: 0.6645, iou_t4: 0.5763, iou_t5: 0.5756, loss: 0.1129
+2026-05-08 15:03:16,997 - mmdet - INFO - Iter [30625/120000]	lr: 1.000e-04, eta: 1 day, 14:19:44, time: 1.329, data_time: 0.020, memory: 37118, loss_mask: 0.0884, loss_texture: 0.0182, iou: 0.6132, iou_t0: 0.6440, iou_t1: 0.6190, iou_t2: 0.6500, iou_t3: 0.6542, iou_t4: 0.4998, iou_t5: 0.5959, loss: 0.1066
+2026-05-08 15:03:51,705 - mmdet - INFO - Iter [30650/120000]	lr: 1.000e-04, eta: 1 day, 14:18:04, time: 1.388, data_time: 0.020, memory: 37118, loss_mask: 0.0999, loss_texture: 0.0193, iou: 0.6038, iou_t0: 0.5434, iou_t1: 0.6269, iou_t2: 0.6069, iou_t3: 0.5938, iou_t4: 0.6972, iou_t5: 0.5963, loss: 0.1191
+2026-05-08 15:04:25,851 - mmdet - INFO - Iter [30675/120000]	lr: 1.000e-04, eta: 1 day, 14:16:15, time: 1.366, data_time: 0.019, memory: 37118, loss_mask: 0.1060, loss_texture: 0.0210, iou: 0.6515, iou_t0: 0.7377, iou_t1: 0.6348, iou_t2: 0.6170, iou_t3: 0.7098, iou_t4: 0.5795, iou_t5: 0.7107, loss: 0.1270
+2026-05-08 15:04:59,282 - mmdet - INFO - Iter [30700/120000]	lr: 1.000e-04, eta: 1 day, 14:14:16, time: 1.337, data_time: 0.020, memory: 37118, loss_mask: 0.0892, loss_texture: 0.0176, iou: 0.5986, iou_t0: 0.6018, iou_t1: 0.5716, iou_t2: 0.6277, iou_t3: 0.5813, iou_t4: 0.6342, iou_t5: 0.6438, loss: 0.1068
+2026-05-08 15:05:34,100 - mmdet - INFO - Iter [30725/120000]	lr: 1.000e-04, eta: 1 day, 14:12:40, time: 1.393, data_time: 0.020, memory: 37118, loss_mask: 0.1122, loss_texture: 0.0200, iou: 0.6400, iou_t0: 0.7238, iou_t1: 0.6514, iou_t2: 0.6673, iou_t3: 0.6009, iou_t4: 0.6330, iou_t5: 0.6535, loss: 0.1321
+2026-05-08 15:06:09,057 - mmdet - INFO - Iter [30750/120000]	lr: 1.000e-04, eta: 1 day, 14:11:06, time: 1.398, data_time: 0.021, memory: 37118, loss_mask: 0.0936, loss_texture: 0.0193, iou: 0.6315, iou_t0: 0.6791, iou_t1: 0.7529, iou_t2: 0.6457, iou_t3: 0.5807, iou_t4: 0.5551, iou_t5: 0.5752, loss: 0.1129
+2026-05-08 15:06:43,453 - mmdet - INFO - Iter [30775/120000]	lr: 1.000e-04, eta: 1 day, 14:09:24, time: 1.376, data_time: 0.019, memory: 37118, loss_mask: 0.1003, loss_texture: 0.0195, iou: 0.6179, iou_t0: 0.6091, iou_t1: 0.6716, iou_t2: 0.5767, iou_t3: 0.6415, iou_t4: 0.6021, iou_t5: 0.5878, loss: 0.1198
+2026-05-08 15:07:17,603 - mmdet - INFO - Iter [30800/120000]	lr: 1.000e-04, eta: 1 day, 14:07:39, time: 1.366, data_time: 0.020, memory: 37118, loss_mask: 0.0917, loss_texture: 0.0184, iou: 0.6023, iou_t0: 0.6051, iou_t1: 0.5855, iou_t2: 0.6042, iou_t3: 0.6110, iou_t4: 0.7055, iou_t5: 0.5323, loss: 0.1101
+2026-05-08 15:07:51,254 - mmdet - INFO - Iter [30825/120000]	lr: 1.000e-04, eta: 1 day, 14:05:46, time: 1.346, data_time: 0.020, memory: 37118, loss_mask: 0.0912, loss_texture: 0.0185, iou: 0.6216, iou_t0: 0.7169, iou_t1: 0.6033, iou_t2: 0.6311, iou_t3: 0.6501, iou_t4: 0.5946, iou_t5: 0.5550, loss: 0.1097
+2026-05-08 15:08:25,665 - mmdet - INFO - Iter [30850/120000]	lr: 1.000e-04, eta: 1 day, 14:04:06, time: 1.376, data_time: 0.020, memory: 37118, loss_mask: 0.1046, loss_texture: 0.0207, iou: 0.6207, iou_t0: 0.6548, iou_t1: 0.5902, iou_t2: 0.6000, iou_t3: 0.6602, iou_t4: 0.5509, iou_t5: 0.6143, loss: 0.1252
+2026-05-08 15:09:00,171 - mmdet - INFO - Iter [30875/120000]	lr: 1.000e-04, eta: 1 day, 14:02:29, time: 1.380, data_time: 0.020, memory: 37118, loss_mask: 0.0967, loss_texture: 0.0192, iou: 0.6350, iou_t0: 0.6441, iou_t1: 0.6025, iou_t2: 0.6039, iou_t3: 0.6695, iou_t4: 0.6330, iou_t5: 0.6651, loss: 0.1158
+2026-05-08 15:09:33,995 - mmdet - INFO - Iter [30900/120000]	lr: 1.000e-04, eta: 1 day, 14:00:41, time: 1.353, data_time: 0.020, memory: 37118, loss_mask: 0.0918, loss_texture: 0.0182, iou: 0.6134, iou_t0: 0.5962, iou_t1: 0.6119, iou_t2: 0.5944, iou_t3: 0.5545, iou_t4: 0.6309, iou_t5: 0.5515, loss: 0.1100
+2026-05-08 15:10:08,156 - mmdet - INFO - Iter [30925/120000]	lr: 1.000e-04, eta: 1 day, 13:58:59, time: 1.366, data_time: 0.020, memory: 37118, loss_mask: 0.0948, loss_texture: 0.0192, iou: 0.6140, iou_t0: 0.5555, iou_t1: 0.5355, iou_t2: 0.7008, iou_t3: 0.6524, iou_t4: 0.5802, iou_t5: 0.5907, loss: 0.1140
+2026-05-08 15:10:41,911 - mmdet - INFO - Iter [30950/120000]	lr: 1.000e-04, eta: 1 day, 13:57:11, time: 1.350, data_time: 0.020, memory: 37118, loss_mask: 0.0956, loss_texture: 0.0194, iou: 0.6201, iou_t0: 0.5069, iou_t1: 0.6025, iou_t2: 0.7346, iou_t3: 0.6685, iou_t4: 0.6572, iou_t5: 0.5767, loss: 0.1150
+2026-05-08 15:11:15,901 - mmdet - INFO - Iter [30975/120000]	lr: 1.000e-04, eta: 1 day, 13:55:28, time: 1.360, data_time: 0.019, memory: 37118, loss_mask: 0.0953, loss_texture: 0.0189, iou: 0.6025, iou_t0: 0.6169, iou_t1: 0.6086, iou_t2: 0.5450, iou_t3: 0.6371, iou_t4: 0.5163, iou_t5: 0.5961, loss: 0.1143
+2026-05-08 15:11:50,278 - mmdet - INFO - 
+--- Val evaluation at iter 31000 ---
+2026-05-08 15:13:04,313 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 89.57       | 93.28       |
+| building   | 49.53       | 59.08       |
+| Summary    | mIoU: 69.55 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 15:13:05,690 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 15:13:05,690 - mmdet - INFO - Iter [31000/120000]	lr: 1.000e-04, eta: 1 day, 13:53:51, time: 1.375, data_time: 0.020, memory: 37118, val/mIoU: 0.6955, val/IoU.building: 0.4953, val/IoU.background: 0.8957, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0904, loss_texture: 0.0184, iou: 0.6340, iou_t0: 0.6290, iou_t1: 0.6496, iou_t2: 0.6789, iou_t3: 0.6613, iou_t4: 0.6225, iou_t5: 0.6256, loss: 0.1088
+2026-05-08 15:13:39,491 - mmdet - INFO - Iter [31025/120000]	lr: 1.000e-04, eta: 1 day, 14:10:39, time: 4.368, data_time: 3.037, memory: 37118, loss_mask: 0.0921, loss_texture: 0.0189, iou: 0.6143, iou_t0: 0.6831, iou_t1: 0.6288, iou_t2: 0.6308, iou_t3: 0.5861, iou_t4: 0.5480, iou_t5: 0.5305, loss: 0.1110
+2026-05-08 15:14:12,688 - mmdet - INFO - Iter [31050/120000]	lr: 1.000e-04, eta: 1 day, 14:08:41, time: 1.328, data_time: 0.020, memory: 37118, loss_mask: 0.0942, loss_texture: 0.0186, iou: 0.6049, iou_t0: 0.6125, iou_t1: 0.6214, iou_t2: 0.6191, iou_t3: 0.6200, iou_t4: 0.5023, iou_t5: 0.6600, loss: 0.1128
+2026-05-08 15:14:46,529 - mmdet - INFO - Iter [31075/120000]	lr: 1.000e-04, eta: 1 day, 14:06:53, time: 1.354, data_time: 0.019, memory: 37118, loss_mask: 0.0974, loss_texture: 0.0193, iou: 0.6395, iou_t0: 0.6230, iou_t1: 0.6854, iou_t2: 0.6600, iou_t3: 0.6800, iou_t4: 0.5509, iou_t5: 0.6047, loss: 0.1167
+2026-05-08 15:15:20,502 - mmdet - INFO - Iter [31100/120000]	lr: 1.000e-04, eta: 1 day, 14:05:07, time: 1.359, data_time: 0.020, memory: 37118, loss_mask: 0.0908, loss_texture: 0.0187, iou: 0.6095, iou_t0: 0.6097, iou_t1: 0.5517, iou_t2: 0.6061, iou_t3: 0.6324, iou_t4: 0.6562, iou_t5: 0.6446, loss: 0.1095
+2026-05-08 15:15:54,949 - mmdet - INFO - Iter [31125/120000]	lr: 1.000e-04, eta: 1 day, 14:03:29, time: 1.378, data_time: 0.020, memory: 37118, loss_mask: 0.1018, loss_texture: 0.0207, iou: 0.6169, iou_t0: 0.5716, iou_t1: 0.5454, iou_t2: 0.7261, iou_t3: 0.6277, iou_t4: 0.5839, iou_t5: 0.6189, loss: 0.1225
+2026-05-08 15:16:28,983 - mmdet - INFO - Iter [31150/120000]	lr: 1.000e-04, eta: 1 day, 14:01:45, time: 1.361, data_time: 0.020, memory: 37118, loss_mask: 0.0984, loss_texture: 0.0193, iou: 0.6185, iou_t0: 0.6686, iou_t1: 0.6935, iou_t2: 0.5905, iou_t3: 0.5867, iou_t4: 0.6623, iou_t5: 0.5610, loss: 0.1177
+2026-05-08 15:17:02,764 - mmdet - INFO - Iter [31175/120000]	lr: 1.000e-04, eta: 1 day, 13:59:58, time: 1.351, data_time: 0.019, memory: 37118, loss_mask: 0.1022, loss_texture: 0.0212, iou: 0.6416, iou_t0: 0.6968, iou_t1: 0.5503, iou_t2: 0.6026, iou_t3: 0.5878, iou_t4: 0.7073, iou_t5: 0.5714, loss: 0.1234
+2026-05-08 15:17:37,394 - mmdet - INFO - Iter [31200/120000]	lr: 1.000e-04, eta: 1 day, 13:58:24, time: 1.385, data_time: 0.020, memory: 37118, loss_mask: 0.1116, loss_texture: 0.0216, iou: 0.6570, iou_t0: 0.6416, iou_t1: 0.6864, iou_t2: 0.6668, iou_t3: 0.6398, iou_t4: 0.6333, iou_t5: 0.7126, loss: 0.1332
+2026-05-08 15:18:10,574 - mmdet - INFO - Iter [31225/120000]	lr: 1.000e-04, eta: 1 day, 13:56:30, time: 1.327, data_time: 0.020, memory: 37118, loss_mask: 0.0887, loss_texture: 0.0177, iou: 0.5783, iou_t0: 0.5779, iou_t1: 0.4925, iou_t2: 0.5553, iou_t3: 0.6368, iou_t4: 0.5953, iou_t5: 0.5893, loss: 0.1064
+2026-05-08 15:18:44,981 - mmdet - INFO - Iter [31250/120000]	lr: 1.000e-04, eta: 1 day, 13:54:54, time: 1.376, data_time: 0.020, memory: 37118, loss_mask: 0.0959, loss_texture: 0.0187, iou: 0.6182, iou_t0: 0.6480, iou_t1: 0.6137, iou_t2: 0.6179, iou_t3: 0.6452, iou_t4: 0.5925, iou_t5: 0.5501, loss: 0.1146
+2026-05-08 15:19:19,358 - mmdet - INFO - Iter [31275/120000]	lr: 1.000e-04, eta: 1 day, 13:53:18, time: 1.375, data_time: 0.020, memory: 37118, loss_mask: 0.0913, loss_texture: 0.0175, iou: 0.6052, iou_t0: 0.5963, iou_t1: 0.5882, iou_t2: 0.5397, iou_t3: 0.6970, iou_t4: 0.5667, iou_t5: 0.5257, loss: 0.1088
+2026-05-08 15:19:54,269 - mmdet - INFO - Iter [31300/120000]	lr: 1.000e-04, eta: 1 day, 13:51:50, time: 1.396, data_time: 0.021, memory: 37118, loss_mask: 0.1011, loss_texture: 0.0201, iou: 0.6282, iou_t0: 0.6888, iou_t1: 0.7162, iou_t2: 0.6365, iou_t3: 0.6073, iou_t4: 0.5905, iou_t5: 0.5877, loss: 0.1212
+2026-05-08 15:20:27,693 - mmdet - INFO - Iter [31325/120000]	lr: 1.000e-04, eta: 1 day, 13:50:02, time: 1.337, data_time: 0.020, memory: 37118, loss_mask: 0.0935, loss_texture: 0.0183, iou: 0.6078, iou_t0: 0.5801, iou_t1: 0.5991, iou_t2: 0.5951, iou_t3: 0.6004, iou_t4: 0.6498, iou_t5: 0.6666, loss: 0.1117
+2026-05-08 15:21:01,696 - mmdet - INFO - Iter [31350/120000]	lr: 1.000e-04, eta: 1 day, 13:48:22, time: 1.360, data_time: 0.020, memory: 37118, loss_mask: 0.1124, loss_texture: 0.0201, iou: 0.6076, iou_t0: 0.6265, iou_t1: 0.5068, iou_t2: 0.6678, iou_t3: 0.5504, iou_t4: 0.6366, iou_t5: 0.6260, loss: 0.1325
+2026-05-08 15:21:35,378 - mmdet - INFO - Iter [31375/120000]	lr: 1.000e-04, eta: 1 day, 13:46:38, time: 1.347, data_time: 0.019, memory: 37118, loss_mask: 0.0912, loss_texture: 0.0181, iou: 0.6246, iou_t0: 0.6083, iou_t1: 0.5830, iou_t2: 0.5987, iou_t3: 0.6167, iou_t4: 0.6852, iou_t5: 0.6952, loss: 0.1092
+2026-05-08 15:22:08,835 - mmdet - INFO - Iter [31400/120000]	lr: 1.000e-04, eta: 1 day, 13:44:52, time: 1.338, data_time: 0.020, memory: 37118, loss_mask: 0.0885, loss_texture: 0.0176, iou: 0.5859, iou_t0: 0.5584, iou_t1: 0.4843, iou_t2: 0.5388, iou_t3: 0.6230, iou_t4: 0.6082, iou_t5: 0.6204, loss: 0.1062
+2026-05-08 15:22:42,912 - mmdet - INFO - Iter [31425/120000]	lr: 1.000e-04, eta: 1 day, 13:43:15, time: 1.363, data_time: 0.020, memory: 37118, loss_mask: 0.0960, loss_texture: 0.0188, iou: 0.6055, iou_t0: 0.5921, iou_t1: 0.7000, iou_t2: 0.6014, iou_t3: 0.6041, iou_t4: 0.4819, iou_t5: 0.6222, loss: 0.1148
+2026-05-08 15:23:16,895 - mmdet - INFO - Iter [31450/120000]	lr: 1.000e-04, eta: 1 day, 13:41:37, time: 1.359, data_time: 0.020, memory: 37118, loss_mask: 0.0962, loss_texture: 0.0192, iou: 0.6235, iou_t0: 0.5771, iou_t1: 0.6248, iou_t2: 0.6886, iou_t3: 0.5994, iou_t4: 0.6083, iou_t5: 0.6339, loss: 0.1154
+2026-05-08 15:23:50,415 - mmdet - INFO - Iter [31475/120000]	lr: 1.000e-04, eta: 1 day, 13:39:53, time: 1.341, data_time: 0.019, memory: 37118, loss_mask: 0.0955, loss_texture: 0.0188, iou: 0.6337, iou_t0: 0.6552, iou_t1: 0.5590, iou_t2: 0.6870, iou_t3: 0.6418, iou_t4: 0.7031, iou_t5: 0.6360, loss: 0.1143
+2026-05-08 15:24:24,606 - mmdet - INFO - 
+--- Val evaluation at iter 31500 ---
+2026-05-08 15:25:39,662 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 91.80       | 93.28       |
+| building   | 55.10       | 59.08       |
+| Summary    | mIoU: 73.45 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 15:25:42,459 - mmdet - INFO - ★ New best mIoU: 73.45% (prev: 71.91%, Δ=+1.54%) → saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/best_model.pth
+2026-05-08 15:25:42,464 - mmdet - INFO - Iter [31500/120000]	lr: 1.000e-04, eta: 1 day, 13:38:19, time: 1.368, data_time: 0.020, memory: 37118, val/mIoU: 0.7345, val/IoU.building: 0.5510, val/IoU.background: 0.9180, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0946, loss_texture: 0.0193, iou: 0.6181, iou_t0: 0.5575, iou_t1: 0.6005, iou_t2: 0.5584, iou_t3: 0.6519, iou_t4: 0.6514, iou_t5: 0.6717, loss: 0.1139
+2026-05-08 15:26:16,752 - mmdet - INFO - Iter [31525/120000]	lr: 1.000e-04, eta: 1 day, 13:54:22, time: 4.486, data_time: 3.135, memory: 37118, loss_mask: 0.0908, loss_texture: 0.0187, iou: 0.6227, iou_t0: 0.6693, iou_t1: 0.5790, iou_t2: 0.6369, iou_t3: 0.5427, iou_t4: 0.6589, iou_t5: 0.5862, loss: 0.1095
+2026-05-08 15:26:51,503 - mmdet - INFO - Iter [31550/120000]	lr: 1.000e-04, eta: 1 day, 13:52:52, time: 1.390, data_time: 0.020, memory: 37118, loss_mask: 0.1065, loss_texture: 0.0213, iou: 0.6226, iou_t0: 0.6602, iou_t1: 0.7382, iou_t2: 0.5950, iou_t3: 0.6307, iou_t4: 0.5588, iou_t5: 0.5102, loss: 0.1279
+2026-05-08 15:27:25,638 - mmdet - INFO - Iter [31575/120000]	lr: 1.000e-04, eta: 1 day, 13:51:14, time: 1.365, data_time: 0.020, memory: 37118, loss_mask: 0.0963, loss_texture: 0.0191, iou: 0.6347, iou_t0: 0.6079, iou_t1: 0.6818, iou_t2: 0.6008, iou_t3: 0.6563, iou_t4: 0.5901, iou_t5: 0.5830, loss: 0.1154
+2026-05-08 15:27:59,118 - mmdet - INFO - Iter [31600/120000]	lr: 1.000e-04, eta: 1 day, 13:49:28, time: 1.339, data_time: 0.020, memory: 37118, loss_mask: 0.0895, loss_texture: 0.0181, iou: 0.5974, iou_t0: 0.5538, iou_t1: 0.5982, iou_t2: 0.6184, iou_t3: 0.5900, iou_t4: 0.4798, iou_t5: 0.6356, loss: 0.1076
+2026-05-08 15:28:33,047 - mmdet - INFO - Iter [31625/120000]	lr: 1.000e-04, eta: 1 day, 13:47:49, time: 1.357, data_time: 0.020, memory: 37118, loss_mask: 0.0980, loss_texture: 0.0196, iou: 0.6340, iou_t0: 0.5973, iou_t1: 0.6203, iou_t2: 0.7233, iou_t3: 0.6265, iou_t4: 0.6140, iou_t5: 0.6399, loss: 0.1176
+2026-05-08 15:29:06,478 - mmdet - INFO - Iter [31650/120000]	lr: 1.000e-04, eta: 1 day, 13:46:03, time: 1.337, data_time: 0.020, memory: 37118, loss_mask: 0.0921, loss_texture: 0.0184, iou: 0.5900, iou_t0: 0.5844, iou_t1: 0.5801, iou_t2: 0.6237, iou_t3: 0.6053, iou_t4: 0.5891, iou_t5: 0.5479, loss: 0.1105
+2026-05-08 15:29:40,292 - mmdet - INFO - Iter [31675/120000]	lr: 1.000e-04, eta: 1 day, 13:44:23, time: 1.353, data_time: 0.019, memory: 37118, loss_mask: 0.0993, loss_texture: 0.0192, iou: 0.6322, iou_t0: 0.5757, iou_t1: 0.6444, iou_t2: 0.6728, iou_t3: 0.6611, iou_t4: 0.6431, iou_t5: 0.6188, loss: 0.1185
+2026-05-08 15:30:13,601 - mmdet - INFO - Iter [31700/120000]	lr: 1.000e-04, eta: 1 day, 13:42:36, time: 1.332, data_time: 0.020, memory: 37118, loss_mask: 0.0912, loss_texture: 0.0177, iou: 0.6009, iou_t0: 0.5916, iou_t1: 0.7145, iou_t2: 0.5586, iou_t3: 0.5143, iou_t4: 0.6442, iou_t5: 0.5561, loss: 0.1090
+2026-05-08 15:30:48,211 - mmdet - INFO - Iter [31725/120000]	lr: 1.000e-04, eta: 1 day, 13:41:08, time: 1.384, data_time: 0.020, memory: 37118, loss_mask: 0.0966, loss_texture: 0.0193, iou: 0.6291, iou_t0: 0.6173, iou_t1: 0.7111, iou_t2: 0.7182, iou_t3: 0.5637, iou_t4: 0.5420, iou_t5: 0.6606, loss: 0.1159
+2026-05-08 15:31:22,443 - mmdet - INFO - Iter [31750/120000]	lr: 1.000e-04, eta: 1 day, 13:39:35, time: 1.369, data_time: 0.020, memory: 37118, loss_mask: 0.0946, loss_texture: 0.0192, iou: 0.6106, iou_t0: 0.5742, iou_t1: 0.5850, iou_t2: 0.5861, iou_t3: 0.6881, iou_t4: 0.5983, iou_t5: 0.6187, loss: 0.1138
+2026-05-08 15:31:56,359 - mmdet - INFO - Iter [31775/120000]	lr: 1.000e-04, eta: 1 day, 13:37:58, time: 1.357, data_time: 0.019, memory: 37118, loss_mask: 0.1026, loss_texture: 0.0204, iou: 0.6092, iou_t0: 0.5917, iou_t1: 0.5796, iou_t2: 0.6651, iou_t3: 0.5772, iou_t4: 0.5366, iou_t5: 0.6849, loss: 0.1230
+2026-05-08 15:32:29,154 - mmdet - INFO - Iter [31800/120000]	lr: 1.000e-04, eta: 1 day, 13:36:07, time: 1.312, data_time: 0.020, memory: 37118, loss_mask: 0.0817, loss_texture: 0.0157, iou: 0.6171, iou_t0: 0.6753, iou_t1: 0.5843, iou_t2: 0.6091, iou_t3: 0.6039, iou_t4: 0.6472, iou_t5: 0.4933, loss: 0.0974
+2026-05-08 15:33:03,489 - mmdet - INFO - Iter [31825/120000]	lr: 1.000e-04, eta: 1 day, 13:34:36, time: 1.373, data_time: 0.020, memory: 37118, loss_mask: 0.0973, loss_texture: 0.0198, iou: 0.6303, iou_t0: 0.6698, iou_t1: 0.5764, iou_t2: 0.6379, iou_t3: 0.6348, iou_t4: 0.5946, iou_t5: 0.6282, loss: 0.1171
+2026-05-08 15:33:37,218 - mmdet - INFO - Iter [31850/120000]	lr: 1.000e-04, eta: 1 day, 13:32:58, time: 1.349, data_time: 0.020, memory: 37118, loss_mask: 0.0979, loss_texture: 0.0195, iou: 0.6173, iou_t0: 0.7266, iou_t1: 0.6414, iou_t2: 0.7110, iou_t3: 0.5559, iou_t4: 0.5667, iou_t5: 0.5075, loss: 0.1175
+2026-05-08 15:34:10,580 - mmdet - INFO - Iter [31875/120000]	lr: 1.000e-04, eta: 1 day, 13:31:16, time: 1.334, data_time: 0.019, memory: 37118, loss_mask: 0.0937, loss_texture: 0.0194, iou: 0.6143, iou_t0: 0.6384, iou_t1: 0.6369, iou_t2: 0.6563, iou_t3: 0.5742, iou_t4: 0.6672, iou_t5: 0.5752, loss: 0.1131
+2026-05-08 15:34:45,372 - mmdet - INFO - Iter [31900/120000]	lr: 1.000e-04, eta: 1 day, 13:29:53, time: 1.392, data_time: 0.019, memory: 37118, loss_mask: 0.0933, loss_texture: 0.0186, iou: 0.6487, iou_t0: 0.6761, iou_t1: 0.7354, iou_t2: 0.6588, iou_t3: 0.6636, iou_t4: 0.5798, iou_t5: 0.5921, loss: 0.1118
+2026-05-08 15:35:19,432 - mmdet - INFO - Iter [31925/120000]	lr: 1.000e-04, eta: 1 day, 13:28:21, time: 1.362, data_time: 0.020, memory: 37118, loss_mask: 0.0990, loss_texture: 0.0191, iou: 0.6199, iou_t0: 0.6072, iou_t1: 0.7063, iou_t2: 0.6587, iou_t3: 0.5790, iou_t4: 0.6291, iou_t5: 0.5575, loss: 0.1181
+2026-05-08 15:35:52,842 - mmdet - INFO - Iter [31950/120000]	lr: 1.000e-04, eta: 1 day, 13:26:40, time: 1.336, data_time: 0.020, memory: 37118, loss_mask: 0.0899, loss_texture: 0.0180, iou: 0.6047, iou_t0: 0.6146, iou_t1: 0.5581, iou_t2: 0.6317, iou_t3: 0.6542, iou_t4: 0.5979, iou_t5: 0.6295, loss: 0.1080
+2026-05-08 15:36:26,691 - mmdet - INFO - Iter [31975/120000]	lr: 1.000e-04, eta: 1 day, 13:25:06, time: 1.354, data_time: 0.019, memory: 37118, loss_mask: 0.1005, loss_texture: 0.0197, iou: 0.6109, iou_t0: 0.6600, iou_t1: 0.5867, iou_t2: 0.6643, iou_t3: 0.6167, iou_t4: 0.5714, iou_t5: 0.5847, loss: 0.1202
+2026-05-08 15:37:00,569 - mmdet - INFO - 
+--- Val evaluation at iter 32000 ---
+2026-05-08 15:38:15,836 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 91.85       | 93.28       |
+| building   | 55.15       | 59.08       |
+| Summary    | mIoU: 73.50 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 15:38:18,494 - mmdet - INFO - ★ New best mIoU: 73.50% (prev: 73.45%, Δ=+0.05%) → saved to /home/ubuntu/vy/Denoiser/SegRefiner/work_dirs/exp8_all/best_model.pth
+2026-05-08 15:38:18,498 - mmdet - INFO - Exp name: exp8_all.py
+2026-05-08 15:38:18,498 - mmdet - INFO - Iter [32000/120000]	lr: 1.000e-04, eta: 1 day, 13:23:33, time: 1.355, data_time: 0.019, memory: 37118, val/mIoU: 0.7350, val/IoU.building: 0.5515, val/IoU.background: 0.9185, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0951, loss_texture: 0.0193, iou: 0.6224, iou_t0: 0.6380, iou_t1: 0.6249, iou_t2: 0.6139, iou_t3: 0.6813, iou_t4: 0.5024, iou_t5: 0.6724, loss: 0.1145
+2026-05-08 15:38:52,209 - mmdet - INFO - Iter [32025/120000]	lr: 1.000e-04, eta: 1 day, 13:38:14, time: 4.466, data_time: 3.137, memory: 37118, loss_mask: 0.0989, loss_texture: 0.0193, iou: 0.6412, iou_t0: 0.5896, iou_t1: 0.7202, iou_t2: 0.6413, iou_t3: 0.6317, iou_t4: 0.5673, iou_t5: 0.6702, loss: 0.1182
+2026-05-08 15:39:26,161 - mmdet - INFO - Iter [32050/120000]	lr: 1.000e-04, eta: 1 day, 13:36:39, time: 1.358, data_time: 0.020, memory: 37118, loss_mask: 0.1006, loss_texture: 0.0196, iou: 0.5992, iou_t0: 0.6436, iou_t1: 0.5471, iou_t2: 0.5390, iou_t3: 0.6121, iou_t4: 0.6368, iou_t5: 0.5685, loss: 0.1201
+2026-05-08 15:39:59,732 - mmdet - INFO - Iter [32075/120000]	lr: 1.000e-04, eta: 1 day, 13:34:59, time: 1.343, data_time: 0.019, memory: 37118, loss_mask: 0.1135, loss_texture: 0.0201, iou: 0.5971, iou_t0: 0.6879, iou_t1: 0.5380, iou_t2: 0.6423, iou_t3: 0.6568, iou_t4: 0.5453, iou_t5: 0.6274, loss: 0.1336
+2026-05-08 15:40:33,742 - mmdet - INFO - Iter [32100/120000]	lr: 1.000e-04, eta: 1 day, 13:33:25, time: 1.360, data_time: 0.019, memory: 37118, loss_mask: 0.1034, loss_texture: 0.0193, iou: 0.6222, iou_t0: 0.6362, iou_t1: 0.6424, iou_t2: 0.6885, iou_t3: 0.5598, iou_t4: 0.6082, iou_t5: 0.6445, loss: 0.1227
+2026-05-08 15:41:07,798 - mmdet - INFO - Iter [32125/120000]	lr: 1.000e-04, eta: 1 day, 13:31:53, time: 1.362, data_time: 0.020, memory: 37118, loss_mask: 0.1018, loss_texture: 0.0194, iou: 0.5978, iou_t0: 0.5620, iou_t1: 0.5669, iou_t2: 0.5870, iou_t3: 0.6723, iou_t4: 0.6279, iou_t5: 0.5756, loss: 0.1212
+2026-05-08 15:41:42,135 - mmdet - INFO - Iter [32150/120000]	lr: 1.000e-04, eta: 1 day, 13:30:24, time: 1.373, data_time: 0.020, memory: 37118, loss_mask: 0.0951, loss_texture: 0.0195, iou: 0.6396, iou_t0: 0.5842, iou_t1: 0.7211, iou_t2: 0.5118, iou_t3: 0.6656, iou_t4: 0.6908, iou_t5: 0.5989, loss: 0.1146
+2026-05-08 15:42:16,693 - mmdet - INFO - Iter [32175/120000]	lr: 1.000e-04, eta: 1 day, 13:28:58, time: 1.382, data_time: 0.019, memory: 37118, loss_mask: 0.0959, loss_texture: 0.0194, iou: 0.6069, iou_t0: 0.6355, iou_t1: 0.6044, iou_t2: 0.6498, iou_t3: 0.5707, iou_t4: 0.5141, iou_t5: 0.5596, loss: 0.1153
+2026-05-08 15:42:52,163 - mmdet - INFO - Iter [32200/120000]	lr: 1.000e-04, eta: 1 day, 13:27:44, time: 1.419, data_time: 0.021, memory: 37118, loss_mask: 0.0934, loss_texture: 0.0193, iou: 0.6377, iou_t0: 0.6312, iou_t1: 0.6853, iou_t2: 0.6265, iou_t3: 0.6777, iou_t4: 0.6026, iou_t5: 0.5953, loss: 0.1127
+2026-05-08 15:43:26,357 - mmdet - INFO - Iter [32225/120000]	lr: 1.000e-04, eta: 1 day, 13:26:14, time: 1.368, data_time: 0.020, memory: 37118, loss_mask: 0.0966, loss_texture: 0.0191, iou: 0.6254, iou_t0: 0.6811, iou_t1: 0.6480, iou_t2: 0.6325, iou_t3: 0.6559, iou_t4: 0.5597, iou_t5: 0.5560, loss: 0.1157
+2026-05-08 15:44:01,205 - mmdet - INFO - Iter [32250/120000]	lr: 1.000e-04, eta: 1 day, 13:24:53, time: 1.394, data_time: 0.021, memory: 37118, loss_mask: 0.1028, loss_texture: 0.0196, iou: 0.6088, iou_t0: 0.6986, iou_t1: 0.6426, iou_t2: 0.6153, iou_t3: 0.5182, iou_t4: 0.5890, iou_t5: 0.6036, loss: 0.1224
+2026-05-08 15:44:36,221 - mmdet - INFO - Iter [32275/120000]	lr: 1.000e-04, eta: 1 day, 13:23:34, time: 1.401, data_time: 0.019, memory: 37118, loss_mask: 0.0866, loss_texture: 0.0177, iou: 0.6413, iou_t0: 0.7385, iou_t1: 0.5865, iou_t2: 0.6907, iou_t3: 0.5709, iou_t4: 0.6396, iou_t5: 0.6134, loss: 0.1044
+2026-05-08 15:45:10,475 - mmdet - INFO - Iter [32300/120000]	lr: 1.000e-04, eta: 1 day, 13:22:06, time: 1.370, data_time: 0.020, memory: 37118, loss_mask: 0.0935, loss_texture: 0.0185, iou: 0.5943, iou_t0: 0.6044, iou_t1: 0.5727, iou_t2: 0.5829, iou_t3: 0.5849, iou_t4: 0.6202, iou_t5: 0.6475, loss: 0.1120
+2026-05-08 15:45:44,524 - mmdet - INFO - Iter [32325/120000]	lr: 1.000e-04, eta: 1 day, 13:20:37, time: 1.362, data_time: 0.020, memory: 37118, loss_mask: 0.0944, loss_texture: 0.0187, iou: 0.6181, iou_t0: 0.6600, iou_t1: 0.6506, iou_t2: 0.5856, iou_t3: 0.6385, iou_t4: 0.5784, iou_t5: 0.6528, loss: 0.1131
+2026-05-08 15:46:19,059 - mmdet - INFO - Iter [32350/120000]	lr: 1.000e-04, eta: 1 day, 13:19:13, time: 1.381, data_time: 0.019, memory: 37118, loss_mask: 0.1060, loss_texture: 0.0205, iou: 0.6299, iou_t0: 0.6144, iou_t1: 0.6311, iou_t2: 0.6960, iou_t3: 0.5972, iou_t4: 0.5843, iou_t5: 0.6819, loss: 0.1264
+2026-05-08 15:46:53,615 - mmdet - INFO - Iter [32375/120000]	lr: 1.000e-04, eta: 1 day, 13:17:50, time: 1.382, data_time: 0.020, memory: 37118, loss_mask: 0.1029, loss_texture: 0.0198, iou: 0.5993, iou_t0: 0.5868, iou_t1: 0.5777, iou_t2: 0.6228, iou_t3: 0.5907, iou_t4: 0.5763, iou_t5: 0.6313, loss: 0.1227
+2026-05-08 15:47:27,880 - mmdet - INFO - Iter [32400/120000]	lr: 1.000e-04, eta: 1 day, 13:16:24, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.1060, loss_texture: 0.0197, iou: 0.6169, iou_t0: 0.6332, iou_t1: 0.5835, iou_t2: 0.6317, iou_t3: 0.6123, iou_t4: 0.5514, iou_t5: 0.6490, loss: 0.1258
+2026-05-08 15:48:02,167 - mmdet - INFO - Iter [32425/120000]	lr: 1.000e-04, eta: 1 day, 13:14:58, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.1043, loss_texture: 0.0200, iou: 0.6039, iou_t0: 0.5096, iou_t1: 0.6198, iou_t2: 0.6666, iou_t3: 0.7074, iou_t4: 0.5281, iou_t5: 0.5430, loss: 0.1243
+2026-05-08 15:48:35,700 - mmdet - INFO - Iter [32450/120000]	lr: 1.000e-04, eta: 1 day, 13:13:24, time: 1.341, data_time: 0.020, memory: 37118, loss_mask: 0.0906, loss_texture: 0.0178, iou: 0.5904, iou_t0: 0.5571, iou_t1: 0.6313, iou_t2: 0.6100, iou_t3: 0.4998, iou_t4: 0.6409, iou_t5: 0.4941, loss: 0.1084
+2026-05-08 15:49:09,984 - mmdet - INFO - Iter [32475/120000]	lr: 1.000e-04, eta: 1 day, 13:11:59, time: 1.371, data_time: 0.020, memory: 37118, loss_mask: 0.0929, loss_texture: 0.0183, iou: 0.6040, iou_t0: 0.6480, iou_t1: 0.5351, iou_t2: 0.7216, iou_t3: 0.5442, iou_t4: 0.5409, iou_t5: 0.6041, loss: 0.1113
+2026-05-08 15:49:43,753 - mmdet - INFO - 
+--- Val evaluation at iter 32500 ---
+2026-05-08 15:51:00,424 - mmdet - INFO - 
++------------+-------------+-------------+
+| Class      | Val IoU     | Pseudo IoU  |
++------------+-------------+-------------+
+| background | 90.78       | 93.28       |
+| building   | 52.16       | 59.08       |
+| Summary    | mIoU: 71.47 | mIoU: 76.18 |
++------------+-------------+-------------+
+Images evaluated: 10
+2026-05-08 15:51:01,818 - mmdet - INFO - Iter [32500/120000]	lr: 1.000e-04, eta: 1 day, 13:10:29, time: 1.351, data_time: 0.020, memory: 37118, val/mIoU: 0.7147, val/IoU.building: 0.5216, val/IoU.background: 0.9078, val/Pseudo_mIoU: 0.7618, loss_mask: 0.0912, loss_texture: 0.0181, iou: 0.6070, iou_t0: 0.6078, iou_t1: 0.6958, iou_t2: 0.5860, iou_t3: 0.5251, iou_t4: 0.5662, iou_t5: 0.6914, loss: 0.1093
+2026-05-08 15:51:36,003 - mmdet - INFO - Iter [32525/120000]	lr: 1.000e-04, eta: 1 day, 13:24:11, time: 4.490, data_time: 3.144, memory: 37118, loss_mask: 0.0976, loss_texture: 0.0196, iou: 0.6310, iou_t0: 0.6207, iou_t1: 0.6232, iou_t2: 0.6417, iou_t3: 0.6250, iou_t4: 0.6516, iou_t5: 0.6239, loss: 0.1171

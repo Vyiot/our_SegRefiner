@@ -31,7 +31,6 @@ model = dict(
     diffusion_cfg=dict(
         betas=dict(type='linear', start=0.8, stop=0.0, num_timesteps=6),
         diff_iter=False,
-        noise_components=dict(use_obj=True, use_bnd=True, use_unc=True)),
     test_cfg=dict(
         model_size=1024,
         fine_prob_thr=0.8,
@@ -52,7 +51,6 @@ train_pipeline = [
     dict(
         type='LoadOEMCoarseMasks',
         use_obj=False,
-        use_bnd=False,
         use_unc=False,
         obj_unc_threshold=0.3,
         test_mode=False),
@@ -121,7 +119,6 @@ data = dict(
             dict(
                 type='LoadOEMCoarseMasks',
                 use_obj=True,
-                use_bnd=True,
                 use_unc=True,
                 test_mode=False),
             dict(type='AddGlobalView', size=256),
@@ -145,7 +142,7 @@ data = dict(
     val=dict(
         type='OEMv2BuildingDataset',
         data_root='/home/ubuntu/vy/Denoiser/OEM_v2_Building',
-        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/val.txt',
+        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/val_hard.txt',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(

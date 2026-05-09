@@ -31,6 +31,8 @@ model = dict(
     diffusion_cfg=dict(
         betas=dict(type='linear', start=0.8, stop=0.0, num_timesteps=6),
         diff_iter=False,
+        noise_components=dict(
+            use_m_obj=True, use_m_unc=False, use_modify_bnd=False)),
     test_cfg=dict(
         model_size=1024,
         fine_prob_thr=0.8,
@@ -139,7 +141,7 @@ data = dict(
     val=dict(
         type='OEMv2BuildingDataset',
         data_root='/home/ubuntu/vy/Denoiser/OEM_v2_Building',
-        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/val.txt',
+        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/val_hard.txt',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(
@@ -204,7 +206,7 @@ data = dict(
                 ])
         ],
         test_mode=True),
-    train_dataloader=dict(samples_per_gpu=4, workers_per_gpu=1),
+    train_dataloader=dict(samples_per_gpu=16, workers_per_gpu=4),
     val_dataloader=dict(samples_per_gpu=1, workers_per_gpu=4))
 optimizer = dict(
     type='AdamW', lr=0.0001, weight_decay=0, eps=1e-08, betas=(0.9, 0.999))
@@ -220,8 +222,8 @@ lr_config = dict(
     warmup_by_epoch=False,
     warmup_ratio=0.001,
     warmup_iters=500)
-oem_eval = dict(interval=500, save_best=True)
+oem_eval = dict(interval=500, num_images=10, save_best=True)
 interval = 1
-work_dir = 'work_dirs/exp5_obj_bnd'
+work_dir = 'work_dirs1/exp2_obj'
 auto_resume = False
 gpu_ids = [0]

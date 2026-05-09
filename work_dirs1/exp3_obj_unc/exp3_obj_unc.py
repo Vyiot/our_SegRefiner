@@ -31,6 +31,8 @@ model = dict(
     diffusion_cfg=dict(
         betas=dict(type='linear', start=0.8, stop=0.0, num_timesteps=6),
         diff_iter=False,
+        noise_components=dict(
+            use_m_obj=True, use_m_unc=True, use_modify_bnd=False)),
     test_cfg=dict(
         model_size=1024,
         fine_prob_thr=0.8,
@@ -54,7 +56,6 @@ train_pipeline = [
         use_unc=False,
         obj_unc_threshold=0.3,
         test_mode=False),
-    dict(type='AddGlobalView', size=256),
     dict(type='RandomCropAll', crop_size=256),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(
@@ -63,13 +64,7 @@ train_pipeline = [
         std=[58.395, 57.12, 57.375],
         to_rgb=True),
     dict(type='DefaultFormatBundle'),
-    dict(
-        type='Collect',
-        keys=[
-            'img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map',
-            'global_img', 'global_gt_np', 'global_coarse_np', 'global_unc_np',
-            'global_edge_np'
-        ])
+    dict(type='Collect', keys=['img', 'gt_masks', 'coarse_masks', 'unc_map'])
 ]
 val_data_root = '/home/ubuntu/vy/Denoiser/OEM_v2_Building'
 val_pipeline = [
@@ -119,7 +114,8 @@ data = dict(
             dict(
                 type='LoadOEMCoarseMasks',
                 use_obj=True,
-                use_unc=False,
+                use_unc=True,
+                obj_unc_threshold=0.3,
                 test_mode=False),
             dict(type='RandomCropAll', crop_size=256),
             dict(type='RandomFlip', flip_ratio=0.5),
@@ -131,15 +127,13 @@ data = dict(
             dict(type='DefaultFormatBundle'),
             dict(
                 type='Collect',
-                keys=[
-                    'img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map'
-                ])
+                keys=['img', 'gt_masks', 'coarse_masks', 'unc_map'])
         ],
         test_mode=False),
     val=dict(
         type='OEMv2BuildingDataset',
         data_root='/home/ubuntu/vy/Denoiser/OEM_v2_Building',
-        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/val.txt',
+        split_file='/home/ubuntu/vy/Denoiser/OEM_v2_Building/val_hard.txt',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(
@@ -204,7 +198,7 @@ data = dict(
                 ])
         ],
         test_mode=True),
-    train_dataloader=dict(samples_per_gpu=4, workers_per_gpu=1),
+    train_dataloader=dict(samples_per_gpu=16, workers_per_gpu=4),
     val_dataloader=dict(samples_per_gpu=1, workers_per_gpu=4))
 optimizer = dict(
     type='AdamW', lr=0.0001, weight_decay=0, eps=1e-08, betas=(0.9, 0.999))
@@ -220,8 +214,8 @@ lr_config = dict(
     warmup_by_epoch=False,
     warmup_ratio=0.001,
     warmup_iters=500)
-oem_eval = dict(interval=500, save_best=True)
+oem_eval = dict(interval=500, num_images=10, save_best=True)
 interval = 1
-work_dir = 'work_dirs/exp5_obj_bnd'
+work_dir = 'work_dirs1/exp3_obj_unc'
 auto_resume = False
 gpu_ids = [0]

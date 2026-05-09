@@ -45,9 +45,9 @@ model = dict(
         diff_iter=False,
         # [ABLATION] Override trong mỗi file exp con
         noise_components=dict(
-            use_obj=False,
-            use_bnd=False,
-            use_unc=False,
+            use_m_obj=False,
+            use_m_unc=False,
+            use_modify_bnd=False,
         )
     ),
     test_cfg=dict(
@@ -76,20 +76,15 @@ train_pipeline = [
     # [NEW] Pipeline đa cấp cho OpenEarthMap
     dict(type='LoadOEMCoarseMasks',
          use_obj=False,
-         use_bnd=False,
          use_unc=False,
          obj_unc_threshold=0.3,
          test_mode=False),
-    # Lưu global view (1024→256) TRƯỚC khi crop
-    dict(type='AddGlobalView', size=object_size),
-    # Crop đồng bộ img + masks + unc_map + edge_map cùng 1 vùng ngẫu nhiên 256×256
+    # Crop đồng bộ img + masks + unc_map cùng 1 vùng ngẫu nhiên 256×256
     dict(type='RandomCropAll', crop_size=object_size),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_masks', 'coarse_masks', 'unc_map', 'edge_map',
-                               'global_img', 'global_gt_np', 'global_coarse_np',
-                               'global_unc_np', 'global_edge_np']),
+    dict(type='Collect', keys=['img', 'gt_masks', 'coarse_masks', 'unc_map']),
 ]
 
 val_data_root = '/home/ubuntu/vy/Denoiser/OEM_v2_Building'
