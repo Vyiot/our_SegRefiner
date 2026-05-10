@@ -27,12 +27,12 @@ from mmdet.datasets.pipelines.loading import modify_boundary
 # ─── CẤU HÌNH ────────────────────────────────────────────────────────────────
 DATA_ROOT = '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'
 CITY      = 'tokyo'
-NAME      = 'tokyo_3'
+NAME      = 'tokyo_2'
 T_MAX     = 6          # num_timesteps
 
 # β̄_t — dùng cho tau mixing (Bernoulli): tỉ lệ lấy M_obj vs M_applied
 # stop=0.15 thay vì 0.0 → t=5 vẫn lấy 15% M_obj
-betas_cumprod = np.linspace(0.3, 0.8, T_MAX)
+betas_cumprod = np.linspace(0.3, 0.9, T_MAX)
 
 # obj_thresholds: tính động từ unc_scores của ảnh (bên dưới sau khi load GT)
 
@@ -115,11 +115,9 @@ def q_sample_vis(t):
             M_obj_new[instances[int(np.argmin(unc_scores))]] = 1.0
         M_obj = M_obj_new
 
-    # ── Eq. 6: M_unc_t — DILATION giảm dần ───────────────────────────────────
-    # t=0: dilate nhiều lần → M_unc rộng nhất
-    # t=5: dilate 0 lần    → M_unc = unc_binary gốc
+    # ── Eq. 6: M_unc_t — DILATION tăng dần ───────────────────────────────────
     unc_binary = torch.tensor((unc > TAU_UNC).astype(np.float32)).unsqueeze(0).unsqueeze(0)
-    n_dilate = 6 - t   # t=0→7, t=1→6, ..., t=5→2
+    n_dilate = T_MAX - t  # t=0→6 lần (nhiều nhiễu), t=5→1 lần (sạch)
     if n_dilate > 0 and unc_binary.sum() > 0:
         m_unc_t = unc_binary
         for _ in range(n_dilate):
@@ -146,8 +144,8 @@ def q_sample_vis(t):
     # + giảm nhiễu tổng thể (range nhỏ hơn)
     # ── modify_boundary — scale theo t (linear schedule chuẩn training) ─────
     noise_level   = t / max(T_MAX - 1, 1)
-    mb_regional   = 0.001 * noise_level
-    mb_sample     = 0.98 
+    mb_regional   = 0.05 * noise_level
+    mb_sample     = 0.5 
     mb_iou        = 1 - 0.01 * noise_level
 
     m_t_before_mb = (m_t >= 0.5).astype(np.float32)
@@ -160,7 +158,7 @@ def q_sample_vis(t):
     else:
         m_t_mb = (m_t_uint8 / 255).astype(np.uint8)
 
-    return m_t_mb.astype(np.float32), M_obj, M_applied, m_t_before_mb, mb_regional, mb_iou
+    return m_t_mb.astype(np.float32), M_obj, M_applied, M_unc, mb_regional, mb_iou
 
 
 # ─── VISUALIZE ───────────────────────────────────────────────────────────────
@@ -175,21 +173,21 @@ fig.suptitle(
 
 col_titles = [
     '① m_t (final)\nEq.11 → mod_bnd',
-    '② RGB overlay',
+    '② Original RGB',
     '③ Error map',
     '④ M_obj_t\nEq.7: obj dropout',
     '⑤ M_applied\nEq.9: M_unc ∩ GT',
-    '⑥ m_t before mod\nraw Eq.11',
+    '⑥ M_unc_t\nEq.6: Dilation',
     '⑦ GT mask',
 ]
 for c, ttl in enumerate(col_titles):
     axes[0, c].set_title(ttl, color='#58a6ff', fontsize=9, fontweight='bold')
 
 for i, t in enumerate(STEPS):
-    coarse, M_obj, M_applied, m_t_before, mb_regional, mb_iou = q_sample_vis(t)
+    coarse, M_obj, M_applied, M_unc_vis, mb_regional, mb_iou = q_sample_vis(t)
 
+    # Column 2: RGB gốc
     overlay = img_rgb.copy()
-    overlay[coarse == 1] = (overlay[coarse == 1] * 0.55 + np.array([220, 50, 50]) * 0.45).clip(0, 255)
 
     diff = np.zeros((*gt.shape, 3), dtype=np.float32)
     diff[(coarse == 1) & (gt == 1)] = [1.0, 1.0, 1.0]   # TP: trắng
@@ -201,7 +199,7 @@ for i, t in enumerate(STEPS):
         f"iou_tgt={mb_iou:.2f}  rate={mb_regional:.2f}",
         color='#e6edf3', fontsize=7, rotation=0, labelpad=55, va='center')
 
-    img_list = [coarse, overlay / 255.0, diff, M_obj, M_applied, m_t_before, gt]
+    img_list = [coarse, overlay / 255.0, diff, M_obj, M_applied, M_unc_vis, gt]
     for c, img_data in enumerate(img_list):
         cmap = 'gray' if c in [0, 3, 4, 5, 6] else None
         axes[i, c].imshow(img_data, cmap=cmap, vmin=0, vmax=1)

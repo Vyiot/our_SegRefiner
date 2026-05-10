@@ -44,17 +44,22 @@ class SegRefinerSemantic(SegRefiner):
         M_obj = torch.zeros_like(gt)
 
         if unc_map is not None:
-            # ── Paper Eq. 7: giữ C_k nếu U_k^obj <= beta_t ──────────
-            threshold = beta_b  # Bài báo dùng trực tiếp beta_t
-            unc_np = unc_map[0, 0].cpu().numpy()
-            kept_any = False
+            # ── [SYNC] Dynamic thresholding dựa trên score_max ────────────
+            unc_np     = unc_map[0, 0].cpu().numpy()
             unc_scores = [unc_np[inst].mean() for inst in instances]
+            score_max  = max(unc_scores)
+            
+            # Cbrt schedule (khớp vis script)
+            alpha      = (t / max(self.num_timesteps - 1, 1)) ** (1/3)
+            threshold  = score_max - alpha * (score_max - score_max / 2.5)
+
+            kept_any = False
             for i, (inst, u_k) in enumerate(zip(instances, unc_scores)):
                 if u_k <= threshold:  # uncertain thấp → giữ
                     mask_2d = torch.from_numpy(inst).to(gt.device)
                     M_obj[0, 0, mask_2d] = 1.0
                     kept_any = True
-            # Đảm bảo luôn giữ ít nhất 1 building (chắc chắn nhất)
+            # Fallback: giữ ít nhất 1 cái chắc chắn nhất
             if not kept_any:
                 best_idx = int(np.argmin(unc_scores))
                 mask_2d = torch.from_numpy(instances[best_idx]).to(gt.device)
@@ -149,7 +154,8 @@ class SegRefinerSemantic(SegRefiner):
         gradient flow; flags chỉ kiểm soát đóng góp vào m_t cuối.
         """
         T = self.num_timesteps  # = 6
-        q_ori_probs  = torch.tensor(self.betas_cumprod, device=current_device)
+        # [SYNC] Dùng dải 0.3 -> 0.9 khớp hoàn toàn với vis script
+        q_ori_probs  = torch.linspace(0.3, 0.9, T).to(current_device)
         beta_t_batch = q_ori_probs[t].reshape(-1, 1, 1, 1)  # (B,1,1,1)
 
         if self._cur_unc_map is None:
@@ -170,15 +176,15 @@ class SegRefinerSemantic(SegRefiner):
             # ── Eq. 7: M_obj_t — luôn tính (Eq.7: per-object uncertainty) ─────
             M_obj = self.generate_object_noise(gt_b, t_val, unc_map=unc_b)
 
-            # ── Eq. 6: M_unc_t — luôn tính (Erode unc n=T-t lần) ─────────────
+            # ── Eq. 6: M_unc_t — [SYNC] DILATION giảm dần ────────────────────
             tau_unc    = 0.5
             unc_binary = (unc_b > tau_unc).float()
-            n_erode    = T - t_val
-            if n_erode > 0 and unc_binary.sum() > 0:
-                neg = 1.0 - unc_binary
-                for _ in range(n_erode):
-                    neg = F.max_pool2d(neg, kernel_size=3, stride=1, padding=1)
-                M_unc_region = 1.0 - neg
+            n_dilate   = 6 - t_val  # Sync vis: t=0->6, t=5->1
+            if n_dilate > 0 and unc_binary.sum() > 0:
+                m_unc_t = unc_binary
+                for _ in range(n_dilate):
+                    m_unc_t = F.max_pool2d(m_unc_t, kernel_size=3, stride=1, padding=1)
+                M_unc_region = m_unc_t
             else:
                 M_unc_region = unc_binary
 
@@ -193,15 +199,14 @@ class SegRefinerSemantic(SegRefiner):
                 m_obj_term     = M_obj           if self.use_m_obj     else torch.zeros_like(gt_b)
                 m_applied_term = M_pixel_applied if self.use_m_unc else torch.zeros_like(gt_b)
                 tau = (torch.rand_like(gt_b) < beta_b).float()
-                m_t = tau * m_obj_term + (1 - tau) * m_applied_term
+                # [SYNC] Đảo vị trí: tau là xác suất lấy M_applied
+                m_t = tau * m_applied_term + (1 - tau) * m_obj_term
 
-            # ── modify_boundary — scale theo timestep, gate theo use_modify_bnd ──
-            # t=0 (β=0.8, sạch): nhẹ  → iou_target=0.90, rates=0.05
-            # t=5 (β=0.0, bẩn): mạnh  → iou_target=0.70, rates=0.20
+            # [SYNC] Ultra-light boundary noise
             noise_level = t_val / max(T - 1, 1)
-            mb_regional = 0.05 + 0.15 * noise_level
-            mb_sample   = 0.05 + 0.15 * noise_level
-            mb_iou      = 0.90 - 0.20 * noise_level
+            mb_regional = 0.05 * noise_level
+            mb_sample   = 0.5
+            mb_iou      = 1.0 - 0.01 * noise_level
             m_t_np = (m_t.detach().cpu().numpy()[0, 0] * 255).astype(np.uint8)
             if self.use_modify_bnd and m_t_np.sum() > 0:
                 m_t_mb = modify_boundary(m_t_np,
