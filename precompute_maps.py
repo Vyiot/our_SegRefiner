@@ -1,14 +1,10 @@
 """
-Precompute uncertainty maps + Canny edge maps — Y CHANG BÀI BÁO.
+Precompute uncertainty maps — Sync với train code hiện tại.
 
 Eq. 1 : M_unc_coarse  = H(W(x_rgb)) / σ  ∈ [0,1]
-         W = weak classifier (GMM 2 components trên RGB)
+         W = weak classifier (GMM n components trên RGB, tìm n bằng BIC)
          H = entropy của posterior probabilities
-         / σ  = chuẩn hóa về [0,1] (với GMM 2 class, H_max = log2(2) = 1 bit)
-
-Eq. 5 : M_bnd_coarse  = Canny(x_rgb)
-         RAW Canny — không dilate thêm ở bước precompute.
-         Việc Dilate(n=t) sẽ được thực hiện ON-THE-FLY trong q_sample (Eq. 8).
+         / σ  = chuẩn hóa về [0,1] (σ = log(K))
 """
 import os
 import os.path as osp
@@ -24,13 +20,6 @@ SPLITS     = ['train.txt']
 
 # Chạy lại hay bỏ qua nếu file đã tồn tại
 RECOMPUTE_UNCERTAINTY = True    # Bật để tính lại GMM với K tối ưu
-RECOMPUTE_CANNY       = False   # Tắt vì Canny đã chuẩn Eq.5 rồi
-
-# Thông số Canny (Eq. 5)
-CANNY_LOW     = 50
-CANNY_HIGH    = 150
-# Không lọc connected component — giữ nguyên tất cả biên từ Canny
-# (dilation sẽ làm sau, tại q_sample, với n_iter = t)
 
 NUM_WORKERS = 8
 # ──────────────────────────────────────────────────────────────────────────────
@@ -88,22 +77,10 @@ def compute_gmm_uncertainty(img_rgb):
     return np.clip(unc, 0.0, 1.0)
 
 
-def compute_canny_raw(img_rgb):
-    """
-    Eq. 5: M_bnd_coarse = Canny(x_rgb)
-
-    RAW Canny — không dilate thêm ở đây.
-    Eq. 8 sẽ Dilate(M_bnd, n_iter=t) on-the-fly trong q_sample.
-    Output: float32 binary {0.0, 1.0}.
-    """
-    img_blur = cv2.GaussianBlur(img_rgb, (5, 5), 0)
-    gray     = cv2.cvtColor(img_blur, cv2.COLOR_RGB2GRAY)
-    edge_raw = cv2.Canny(gray, CANNY_LOW, CANNY_HIGH)
-    return (edge_raw.astype(np.float32) / 255.0)   # {0.0, 1.0}
 
 
 def process_one_image(args):
-    img_path, unc_path, edge_path = args
+    img_path, unc_path = args
     img_bgr = cv2.imread(img_path)
     if img_bgr is None:
         return False
@@ -113,11 +90,6 @@ def process_one_image(args):
     if RECOMPUTE_UNCERTAINTY or not osp.exists(unc_path):
         unc = compute_gmm_uncertainty(img_rgb)
         np.save(unc_path, unc)
-
-    # Eq. 5: Raw Canny edge
-    if RECOMPUTE_CANNY or not osp.exists(edge_path):
-        edge = compute_canny_raw(img_rgb)
-        np.save(edge_path, edge)
 
     return True
 
@@ -144,21 +116,15 @@ def main():
             continue
         img_path  = osp.join(DATA_ROOT, city, 'images',      basename + '.tif')
         unc_path  = osp.join(DATA_ROOT, city, 'uncertainty', basename + '.npy')
-        edge_path = osp.join(DATA_ROOT, city, 'edges',       basename + '.npy')
 
         os.makedirs(osp.dirname(unc_path),  exist_ok=True)
-        os.makedirs(osp.dirname(edge_path), exist_ok=True)
 
-        need_unc  = RECOMPUTE_UNCERTAINTY or not osp.exists(unc_path)
-        need_edge = RECOMPUTE_CANNY       or not osp.exists(edge_path)
-
-        if need_unc or need_edge:
-            pending.append((img_path, unc_path, edge_path))
+        if RECOMPUTE_UNCERTAINTY or not osp.exists(unc_path):
+            pending.append((img_path, unc_path))
 
     if pending:
-        print(f"Processing {len(pending)} images  (GMM={RECOMPUTE_UNCERTAINTY}, Canny={RECOMPUTE_CANNY})")
-        print("  Eq.1: uncertainty = H(GMM) / log2  ∈ [0,1]")
-        print("  Eq.5: edge = raw Canny (no dilation — Eq.8 dilates on-the-fly)")
+        print(f"Processing {len(pending)} images  (GMM_recompute={RECOMPUTE_UNCERTAINTY})")
+        print("  Eq.1: uncertainty = H(GMM) / log(K)  ∈ [0,1]")
         with ProcessPoolExecutor(max_workers=NUM_WORKERS) as executor:
             list(tqdm(executor.map(process_one_image, pending), total=len(pending)))
     else:

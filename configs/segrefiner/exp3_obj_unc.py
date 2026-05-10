@@ -31,7 +31,7 @@ data = dict(
     train=dict(pipeline=[
         dict(type='LoadImageFromFile'),
         dict(type='LoadAnnotations', with_bbox=False, with_label=False, with_mask=False, with_seg=True),
-        dict(type='LoadOEMCoarseMasks', use_obj=True, use_unc=True, obj_unc_threshold=0.3, test_mode=False),
+        dict(type='LoadOEMCoarseMasks', use_obj=True, use_unc=True, test_mode=False),
         dict(type='RandomCropAll', crop_size=256),
         dict(type='RandomFlip', flip_ratio=0.5),
         dict(type='Normalize', mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True),

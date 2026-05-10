@@ -77,7 +77,6 @@ train_pipeline = [
     dict(type='LoadOEMCoarseMasks',
          use_obj=False,
          use_unc=False,
-         obj_unc_threshold=0.3,
          test_mode=False),
     # Crop đồng bộ img + masks + unc_map cùng 1 vùng ngẫu nhiên 256×256
     dict(type='RandomCropAll', crop_size=object_size),

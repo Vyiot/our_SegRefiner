@@ -1062,22 +1062,24 @@ class LoadOEMCoarseMasks:
 
     Khi tất cả đều False, sẽ dùng phương pháp gốc của SegRefiner (modify_boundary).
 
+    Lưu ý: ngưỡng object-level (M_obj) được model tự tính theo beta_t từng timestep
+    (segrefiner_semantic.py: threshold = beta_b). Không cần truyền thủ công.
+
     Args:
         use_obj (bool): Bật Object-level noise. Mặc định True.
         use_unc (bool): Bật Uncertainty-level noise (GMM). Mặc định True.
-        obj_unc_threshold (float): Ngưỡng độ bất định để xóa tòa nhà. Mặc định 0.5.
         test_mode (bool): True nếu là val/test (không tạo noise, load mask sẵn có).
     """
 
     def __init__(self,
                  use_obj=True,
                  use_unc=True,
-                 obj_unc_threshold=0.5,
                  test_mode=False,
-                 pseudolabel_dir=None):
+                 pseudolabel_dir=None,
+                 # Deprecated: obj_unc_threshold không được dùng, model tự dùng beta_t
+                 obj_unc_threshold=None):
         self.use_obj = use_obj
         self.use_unc = use_unc
-        self.obj_unc_threshold = obj_unc_threshold
         self.test_mode = test_mode
         self.pseudolabel_dir = pseudolabel_dir
 
@@ -1179,22 +1181,23 @@ class RandomCropAll:
     Giúp model tập trung học vùng khó mà GMM không chắc chắn.
     """
 
-    def __init__(self, crop_size, unc_jitter=64):
+    def __init__(self, crop_size, unc_jitter=64, unc_threshold=0.3):
         if isinstance(crop_size, int):
             crop_size = (crop_size, crop_size)
         self.crop_h, self.crop_w = crop_size
-        self.unc_jitter = unc_jitter  # jitter pixels quanh tâm uncertain
+        self.unc_jitter = unc_jitter    # jitter pixels quanh tâm uncertain
+        self.unc_threshold = unc_threshold  # ngưỡng uncertainty để weighted crop
 
     def _get_crop_origin(self, H, W, unc_map):
         """Tính điểm crop (y1, x1): sample ngẫu nhiên có trọng số từ
-        tất cả pixel có unc > 0.3, thay vì luôn chọn pixel cao nhất.
-        Fallback về random chỉ khi unc_map=None hoặc không có pixel > 0.3.
+        tất cả pixel có unc > unc_threshold, thay vì luôn chọn pixel cao nhất.
+        Fallback về random chỉ khi unc_map=None hoặc không có pixel > unc_threshold.
         """
         margin_h = max(H - self.crop_h, 0)
         margin_w = max(W - self.crop_w, 0)
 
         if unc_map is not None:
-            unc_mask     = unc_map > 0.3                              # pixels đủ uncertain
+            unc_mask     = unc_map > self.unc_threshold               # pixels đủ uncertain
             weights_flat = (unc_map * unc_mask).ravel().astype(np.float64)
             total        = weights_flat.sum()
             if total > 0:

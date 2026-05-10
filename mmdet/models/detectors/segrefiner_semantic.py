@@ -186,10 +186,14 @@ class SegRefinerSemantic(SegRefiner):
             M_pixel_applied = ((M_unc_region > 0.5) * gt_b).float()
 
             # ── Eq. 11: gate theo ablation flags ─────────────────────────────
-            m_obj_term     = M_obj           if self.use_m_obj     else torch.zeros_like(gt_b)
-            m_applied_term = M_pixel_applied if self.use_m_unc else torch.zeros_like(gt_b)
-            tau = (torch.rand_like(gt_b) < beta_b).float()
-            m_t = tau * m_obj_term + (1 - tau) * m_applied_term
+            if not self.use_m_obj and not self.use_m_unc:
+                # [NEW] Nếu tắt cả obj và unc, dùng GT làm gốc để modify boundary
+                m_t = gt_b
+            else:
+                m_obj_term     = M_obj           if self.use_m_obj     else torch.zeros_like(gt_b)
+                m_applied_term = M_pixel_applied if self.use_m_unc else torch.zeros_like(gt_b)
+                tau = (torch.rand_like(gt_b) < beta_b).float()
+                m_t = tau * m_obj_term + (1 - tau) * m_applied_term
 
             # ── modify_boundary — scale theo timestep, gate theo use_modify_bnd ──
             # t=0 (β=0.8, sạch): nhẹ  → iou_target=0.90, rates=0.05

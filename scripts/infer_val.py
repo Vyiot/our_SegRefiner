@@ -36,9 +36,9 @@ from mmdet.datasets import build_dataset
 from mmcv.parallel import collate, scatter
 
 ROOT_DIR         = osp.abspath(osp.join(osp.dirname(__file__), '..'))
-CONFIG_FILE      = osp.join(ROOT_DIR, 'work_dirs1/exp2_obj/exp2_obj.py')
-CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs1/exp2_obj/best_model3.pth')
-VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs1/exp2_obj/vis_gmm_refine_val')
+CONFIG_FILE      = osp.join(ROOT_DIR, 'work_dirs1/exp5_bnd/exp5_bnd.py')
+CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs1/exp5_bnd/best_model.pth')
+VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs1/exp5_bnd/vis_gmm_refine_val')
 DEVICE           = 'cuda:0'
 BATCH_SIZE       = 1
 NUM_WORKERS      = 4
@@ -51,9 +51,9 @@ VAL_SPLIT_FILE   = '/home/ubuntu/vy/Denoiser/OEM_v2_Building/val.txt'  # Overrid
 VAL_PSEUDO_DIR   = 'pseudolabels'   # tên thư mục pseudo-label trong VAL_DATA_ROOT
 
 PATCH_SIZE       = 256          # kích thước patch local
-UNC_THRESHOLD    = 0.2          # pixel có unc_map > ngưỡng này → cần sửa (giống RandomCropAll train)
+UNC_THRESHOLD    = 0.3          # pixel có unc_map > ngưỡng này → cần sửa (giống RandomCropAll train)
 MAX_LOCAL_PATCHES = 48          # số patch tối đa mỗi ảnh
-NMS_IOU_THR      = 0.2          # NMS IoU threshold để lọc patch chồng lấp
+NMS_IOU_THR      = 0.3          # NMS IoU threshold để lọc patch chồng lấp
 
 # Chỉ chạy trên ảnh này để test nhanh (None = chạy tất cả)
 TARGET_IMAGE     = None  # None = chạy tất cả
