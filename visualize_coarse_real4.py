@@ -6,11 +6,27 @@ Eq. 3 : U_k^obj       = (1/|C_k|) * Σ M_coarse_unc(i,j)  for (i,j) ∈ C_k
 Eq. 4 : M_coarse^obj   = U_k^obj nếu (i,j) ∈ C_k, 0 nếu background
 Eq. 5 : M_bnd_coarse  = modify_boundary(M_fine, t)   (BOUNDARY NOISE)
 Eq. 6 : M_unc_t       = Erode( 1[M_unc > τ_unc], n_iter=T−t )
-Eq. 7 : M_obj_t(i,j)  = 0 nếu (i,j)∈C_k AND U_k^obj > β̄_t, else M_fine(i,j)
+Eq. 7 : M_obj_t(i,j)  = 0 nếu (i,j)∈C_k AND U_k^obj > threshold_t, else M_fine(i,j) (DYNAMIC DROPOUT)
 Eq. 8 : M_bnd_t       = Dilate( M_bnd_coarse, n_iter=t )
 Eq. 9 : I_fused       = M_unc_t ∪ M_bnd_t
 Eq.10 : M_pixel_t     = 1_{fused=1}·(1−M_fine) + 1_{fused=0}·M_fine
 Eq.11 : m_t           = τ^{i,j}·M_obj_t + (1−τ^{i,j})·M_pixel_t, τ~Bernoulli(β̄_t)
+
+ALGORITHM: DYNAMIC OBJECT DROPOUT THRESHOLD
+-------------------------------------------
+1. Find connected components (instances) of foreground mask: C_1, C_2, ..., C_N
+2. For each instance C_k:
+     Calculate its average GMM uncertainty: U_k^obj = Mean(M_unc[C_k])
+3. Find the maximum uncertainty among all components: score_max = Max(U_1^obj, ..., U_N^obj)
+4. For each timestep t in [0, T-1]:
+     a. Compute alpha_t = (t / (T - 1))^(1/3)
+     b. Compute dynamic threshold_t = score_max - alpha_t * (score_max - score_max / 2.5)
+5. During Q-Sampling at timestep t:
+     For each instance C_k:
+       If U_k^obj > threshold_t:
+         Drop the instance: set mask[C_k] = 0
+       Else:
+         Keep the instance: set mask[C_k] = M_fine[C_k]
 """
 import numpy as np
 import cv2
@@ -25,7 +41,7 @@ from mmdet.datasets.pipelines.loading import modify_boundary
 # ─── CẤU HÌNH ────────────────────────────────────────────────────────────────
 DATA_ROOT = '/home/ubuntu/vy/Denoiser/OpenEarthMap_wo_xBD'
 CITY      = 'paris'
-NAME      = 'paris_1'
+NAME      = 'paris_10'
 T_MAX     = 6          # num_timesteps — betas_cumprod có 6 phần tử
 
 # Beta schedule chuẩn bài báo: t=0 → 0.8 (sạch nhất), t=5 → 0.0 (bẩn nhất)
@@ -33,13 +49,13 @@ T_MAX     = 6          # num_timesteps — betas_cumprod có 6 phần tử
 betas_cumprod = np.linspace(0.8, 0.0, T_MAX)
 
 # Ngưỡng tau_unc (Eq.6)
-TAU_UNC = 0.3
+TAU_UNC = 0.5
 
 # ─── ABLATION FLAGS ──────────────────────────────────────────────────────────
 # Bật/tắt từng thành phần đóng góp vào m_t cuối cùng:
 USE_M_OBJ      = True   # M_obj term trong Eq.11:  tau * M_obj
 USE_M_APPLIED  = True   # M_pixel_applied term:     (1-tau) * M_pixel_applied
-USE_MODIFY_BND = True   # Áp modify_boundary sau Eq.11 (nhiễu biên ngẫu nhiên)
+USE_M_BND      = True  # False = tắt bnd noise trong Eq.9 (không dùng bnd)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─── ĐỌC DỮ LIỆU ─────────────────────────────────────────────────────────────
@@ -61,6 +77,26 @@ else:
     # Chuẩn hóa về [0,1] bằng σ (max entropy của 2-component GMM = 1 bit)
     unc = entropy.reshape(img_rgb.shape[:2]).astype(np.float32)
     unc = np.clip(unc, 0.0, 1.0)   # đã ∈ [0,1] vì chia log2
+
+# ─── PRECOMPUTE: instances + unc_scores + dynamic obj_thresholds ──────────────
+from skimage import measure
+_labeled    = measure.label(gt > 0.5)
+instances   = [(_labeled == i) for i in range(1, _labeled.max() + 1)]
+if len(instances) > 0:
+    unc_scores = [unc[inst].mean() for inst in instances]
+    score_max  = max(unc_scores)
+    score_min  = min(unc_scores)
+else:
+    unc_scores = []
+    score_max  = score_min = 0.0
+
+# Cbrt schedule: lõm mạnh nhất → drop cực nhanh t=0→1, rất chậm ở t=3,4,5
+_t    = np.arange(T_MAX)
+alpha = (_t / (T_MAX - 1)) ** (1/3)              # [0 → 1], lõm cực mạnh
+obj_thresholds_img = score_max - alpha * (score_max - score_max / 2.5)
+# t=0→score_max (fast drop) → t=5→score_max/2.5 (slow, clustered)
+print(f"DEBUG: score_max={score_max:.3f}  score_min={score_min:.3f}")
+print(f"DEBUG: obj_thresholds_img = {np.round(obj_thresholds_img, 3)}")
 
 # ── Eq. 5: M_bnd_coarse = modify_boundary(M_fine, t) ────────────────────────
 # M_bnd_coarse sẽ được tính trong q_sample_vis() vì phụ thuộc vào t
@@ -87,22 +123,18 @@ def q_sample_vis(t):
     """
     beta_b = betas_cumprod[t]   # β̄_t
 
-    # ── Eq. 3: U_k^obj = mean uncertainty of each connected component ────────
-    labeled   = measure.label(gt > 0.5)
-    instances = [(labeled == i) for i in range(1, labeled.max() + 1)]
-    unc_scores = [unc[inst].mean() for inst in instances] if len(instances) > 0 else []
-
     # ── Eq. 4: M_coarse^obj(i,j) = U_k^obj nếu (i,j) ∈ C_k, 0 nếu bg ──────
     M_coarse_obj = np.zeros_like(gt)
     for inst_mask, u_k in zip(instances, unc_scores):
         M_coarse_obj[inst_mask] = u_k
 
-    # ── Eq. 7: M_obj_t(i,j) = 0 nếu (i,j)∈C_k AND U_k > β̄_t ──────────────
+    # ── Eq. 7: M_obj_t(i,j) = 0 nếu (i,j)∈C_k AND U_k^obj > obj_thr ──────────
     #           M_obj_t(i,j) = M_fine(i,j) otherwise
+    obj_thr = obj_thresholds_img[t]
     M_obj = gt.copy()   # default: M_fine(i,j) cho mọi pixel (kể cả background=0)
     if len(instances) > 0:
         for inst_mask, u_k in zip(instances, unc_scores):
-            if u_k > beta_b:             # U_k^obj > β̄_t → xóa (set = 0)
+            if u_k > obj_thr:             # U_k^obj > obj_thr → xóa (set = 0)
                 M_obj[inst_mask] = 0.0
             # else: giữ nguyên M_fine(i,j) = gt(i,j) đã copy ở trên
 
@@ -122,7 +154,6 @@ def q_sample_vis(t):
     else:
         M_bnd = (M_bnd_coarse > 0.5).astype(np.float32)
 
-    # ── Eq. 6: M_unc_t — luôn tính để visualize ────────────────────────────
     unc_binary = (unc > TAU_UNC).astype(np.uint8)
     n_erode = T_MAX - t
     if n_erode > 0 and unc_binary.sum() > 0:
@@ -132,67 +163,66 @@ def q_sample_vis(t):
     else:
         M_unc = unc_binary.astype(np.float32)
 
-    # ── Eq. 9: I_fused = M_unc_t ∪ M_bnd_t ──────────────────────────────────
-    I_fused = ((M_bnd > 0.5) | (M_unc > 0.5)).astype(np.float32)
+    if USE_M_BND:
+        I_fused = ((M_bnd > 0.5) | (M_unc > 0.5)).astype(np.float32)
+    else:
+        I_fused = (M_unc > 0.5).astype(np.float32)
 
-    # ── Eq.10: M_pixel_t = 1_{fused=1}·(1−M_fine) + 1_{fused=0}·M_fine ─────
     M_pixel = I_fused * (1.0 - gt) + (1.0 - I_fused) * gt
 
-    # ── Eq.11: m_t = τ·M_obj_t + (1−τ)·M_pixel_t, τ~Bernoulli(β̄_t) ────────
     tau = (np.random.rand(*gt.shape) < beta_b).astype(np.float32)
     m_obj_term   = M_obj   if USE_M_OBJ     else np.zeros_like(gt)
     m_pixel_term = M_pixel if USE_M_APPLIED else np.zeros_like(gt)
     m_t = tau * m_obj_term + (1 - tau) * m_pixel_term
 
-    # ── modify_boundary — scale theo timestep, gate theo USE_MODIFY_BND ──────
-    # t=0 (sạch, β=0.8): nhẹ  → iou_target=0.90, rates=0.05
-    # t=5 (bẩn, β=0.0): mạnh → iou_target=0.70, rates=0.20
-    noise_level = t / max(T_MAX - 1, 1)               # 0.0 … 1.0
-    mb_regional = 0.05 + 0.15 * noise_level
-    mb_sample   = 0.05 + 0.15 * noise_level
-    mb_iou      = 0.90 - 0.20 * noise_level
-    m_t_before_mb = (m_t >= 0.5).astype(np.float32)   # Eq.11 output trước modify_bnd
-    m_t_uint8 = (m_t >= 0.5).astype(np.uint8) * 255
-    if USE_MODIFY_BND and m_t_uint8.sum() > 0:
-        m_t_mb = modify_boundary(m_t_uint8,
-                                 regional_sample_rate=mb_regional,
-                                 sample_rate=mb_sample,
-                                 iou_target=mb_iou)
-    else:
-        m_t_mb = (m_t_uint8 / 255).astype(np.uint8)   # không áp / mask rỗng
-
-    return (m_t_mb.astype(np.float32), M_coarse_obj, M_obj, M_bnd_coarse, M_bnd,
-            M_unc, I_fused, M_pixel, m_t_before_mb, mb_regional, mb_iou)
+    coarse = (m_t >= 0.5).astype(np.float32)
+    return (coarse, M_coarse_obj, M_obj, M_bnd_coarse, M_bnd,
+            M_unc, I_fused, M_pixel)
 
 # ─── VISUALIZE ───────────────────────────────────────────────────────────────
 STEPS = list(range(T_MAX))   # t = 0, 1, 2, 3, 4, 5
-n_cols = 9   # RGB | GT | M_unc | M_obj | M_bnd | I_fused | M_pixel | m_t | Error
-fig, axes = plt.subplots(len(STEPS), n_cols, figsize=(40, 4.5 * len(STEPS)))
+if USE_M_BND:
+    col_titles = [
+        '① RGB\noriginal',
+        '② GT\nground truth',
+        '③ M_unc_t\nEq.6 eroded uncertainty',
+        '④ M_obj_t\nEq.7 object dropout',
+        '⑤ M_bnd_t\nEq.8 dilated bnd',
+        '⑥ I_fused\nEq.9 M_unc ∪ M_bnd',
+        '⑦ M_pixel_t\nEq.10 flip/keep',
+        '⑧ m_t\nEq.11 final',
+        '⑨ Error map\nTP=W · FP=R · FN=B',
+    ]
+    gray_indices = [1, 2, 3, 4, 5, 6, 7]
+else:
+    col_titles = [
+        '① RGB\noriginal',
+        '② GT\nground truth',
+        '③ M_unc_t\nEq.6 eroded uncertainty',
+        '④ M_obj_t\nEq.7 object dropout',
+        '⑤ I_fused\nEq.9 M_unc only',
+        '⑥ M_pixel_t\nEq.10 flip/keep',
+        '⑦ m_t\nEq.11 final',
+        '⑧ Error map\nTP=W · FP=R · FN=B',
+    ]
+    gray_indices = [1, 2, 3, 4, 5, 6]
+
+n_cols = len(col_titles)
+fig, axes = plt.subplots(len(STEPS), n_cols, figsize=(4.5 * n_cols, 4.5 * len(STEPS)))
 fig.patch.set_facecolor('#0d1117')
 fig.suptitle(
     f"Q-Sample  |  {NAME}  |  T={T_MAX}  |  "
-    f"M_obj={USE_M_OBJ}  M_pixel={USE_M_APPLIED}  modify_bnd={USE_MODIFY_BND}",
+    f"M_obj={USE_M_OBJ}  M_pixel={USE_M_APPLIED}  M_bnd={USE_M_BND}",
     color='#e6edf3', fontsize=16, fontweight='bold', y=1.01
 )
 
-col_titles = [
-    '① RGB\noriginal',
-    '② GT\nground truth',
-    '③ M_unc_t\nEq.6 eroded uncertainty',
-    '④ M_obj_t\nEq.7 object dropout',
-    '⑤ M_bnd_t\nEq.8 dilated bnd',
-    '⑥ I_fused\nEq.9 M_unc ∪ M_bnd',
-    '⑦ M_pixel_t\nEq.10 flip/keep',
-    '⑧ m_t\nEq.11 final',
-    '⑨ Error map\nTP=W · FP=R · FN=B',
-]
 for c, ttl in enumerate(col_titles):
     axes[0, c].set_title(ttl, color='#58a6ff', fontsize=13, fontweight='bold',
                          linespacing=1.45)
 
 for i, t in enumerate(STEPS):
     (coarse, M_coarse_obj, M_obj, M_bnd_coarse, M_bnd,
-     M_unc, I_fused, M_pixel, m_t_before, mb_regional, mb_iou) = q_sample_vis(t)
+     M_unc, I_fused, M_pixel) = q_sample_vis(t)
     beta_b = betas_cumprod[t]
 
     # Diff map: TP=trắng (1,1,1), FP=đỏ (1,0,0), FN=xanh lam (0,0.5,1)
@@ -209,24 +239,35 @@ for i, t in enumerate(STEPS):
     fn_percent = (fn_pixels / gt_sum) * 100
 
     row_label = (f"t={t}  β̄={beta_b:.2f}\n"
-                 f"n_bnd={t}  n_unc={T_MAX-t}\n"
                  f"FP={fp_percent:.1f}%\nFN={fn_percent:.1f}%")
     axes[i, 0].set_ylabel(row_label, color='#e6edf3', fontsize=9, rotation=0,
                           labelpad=95, va='center')
 
-    img_list = [
-        img_rgb / 255.0,       # ① RGB
-        gt,                    # ② GT
-        M_unc,                 # ③ M_unc_t (Eq.6 eroded uncertainty)
-        M_obj,                 # ④ M_obj_t
-        M_bnd,                 # ⑤ M_bnd_t
-        I_fused,               # ⑥ I_fused
-        M_pixel,               # ⑦ M_pixel_t
-        coarse,                # ⑧ m_t final
-        diff,                  # ⑨ Error map
-    ]
+    if USE_M_BND:
+        img_list = [
+            img_rgb / 255.0,       # ① RGB
+            gt,                    # ② GT
+            M_unc,                 # ③ M_unc_t (Eq.6 eroded uncertainty)
+            M_obj,                 # ④ M_obj_t
+            M_bnd,                 # ⑤ M_bnd_t
+            I_fused,               # ⑥ I_fused
+            M_pixel,               # ⑦ M_pixel_t
+            coarse,                # ⑧ m_t final
+            diff,                  # ⑨ Error map
+        ]
+    else:
+        img_list = [
+            img_rgb / 255.0,       # ① RGB
+            gt,                    # ② GT
+            M_unc,                 # ③ M_unc_t (Eq.6 eroded uncertainty)
+            M_obj,                 # ④ M_obj_t
+            I_fused,               # ⑤ I_fused
+            M_pixel,               # ⑥ M_pixel_t
+            coarse,                # ⑦ m_t final
+            diff,                  # ⑧ Error map
+        ]
     for c, img_data in enumerate(img_list):
-        cmap = 'gray' if c in [1, 2, 3, 4, 5, 6, 7] else None
+        cmap = 'gray' if c in gray_indices else None
         axes[i, c].imshow(img_data, cmap=cmap, vmin=0, vmax=1)
         axes[i, c].axis('off')
 

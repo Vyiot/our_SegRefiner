@@ -2,6 +2,7 @@ import os
 import torch
 import torch.nn.functional as F
 import numpy as np
+import cv2
 from .segrefiner_base import SegRefiner
 from ..builder import DETECTORS, build_head, build_loss
 from mmdet.datasets.pipelines.loading import modify_boundary
@@ -28,9 +29,7 @@ class SegRefinerSemantic(SegRefiner):
         raise NotImplementedError
 
     def generate_object_noise(self, gt, t, unc_map=None):
-        """Eq. 7: Xóa object C_k nếu U_k^obj > beta_t.
-        U_k^obj = mean uncertainty của tất cả pixel trong C_k.
-        Nếu không có unc_map, fallback về random selection.
+        """Eq. 7: Xóa object C_k nếu U_k^obj > threshold_t (Dynamic Dropout).
         """
         from skimage import measure
         gt_np = (gt[0, 0].cpu().numpy() > 0.5).astype(np.uint8)
@@ -41,7 +40,7 @@ class SegRefinerSemantic(SegRefiner):
         if num_instances == 0: return torch.zeros_like(gt)
 
         beta_b = self.betas_cumprod[t]
-        M_obj = torch.zeros_like(gt)
+        M_obj = gt.clone()
 
         if unc_map is not None:
             # ── [SYNC] Dynamic thresholding dựa trên score_max ────────────
@@ -53,19 +52,14 @@ class SegRefinerSemantic(SegRefiner):
             alpha      = (t / max(self.num_timesteps - 1, 1)) ** (1/3)
             threshold  = score_max - alpha * (score_max - score_max / 2.5)
 
-            kept_any = False
             for i, (inst, u_k) in enumerate(zip(instances, unc_scores)):
-                if u_k <= threshold:  # uncertain thấp → giữ
+                if u_k > threshold:  # U_k^obj > threshold_t -> xóa
                     mask_2d = torch.from_numpy(inst).to(gt.device)
-                    M_obj[0, 0, mask_2d] = 1.0
-                    kept_any = True
-            # Fallback: giữ ít nhất 1 cái chắc chắn nhất
-            if not kept_any:
-                best_idx = int(np.argmin(unc_scores))
-                mask_2d = torch.from_numpy(instances[best_idx]).to(gt.device)
-                M_obj[0, 0, mask_2d] = 1.0
+                    M_obj[0, 0, mask_2d] = 0.0
         else:
             # ── Fallback: random selection (không có unc_map) ────────
+            # Xóa ngẫu nhiên các object để còn giữ lại tỉ lệ beta_b
+            M_obj = torch.zeros_like(gt)
             keep_indices = np.random.choice(
                 num_instances,
                 max(1, int(num_instances * beta_b)),
@@ -75,6 +69,18 @@ class SegRefinerSemantic(SegRefiner):
                 M_obj[0, 0, mask_2d] = 1.0
 
         return M_obj
+
+    def my_modify_boundary(self, image):
+        # input: np array of size [H,W] image (uint8)
+        # 1. Tạo coarse mask gốc
+        coarse_mask = modify_boundary(image)
+        # 2. Trích xuất biên (boundary) của coarse mask đó
+        coarse_uint8 = (coarse_mask * 255).astype(np.uint8)
+        kernel = np.ones((3, 3), np.uint8)
+        dilated = cv2.dilate(coarse_uint8, kernel, iterations=1)
+        eroded = cv2.erode(coarse_uint8, kernel, iterations=1)
+        boundary = cv2.subtract(dilated, eroded)
+        return (boundary > 127).astype(np.float32)
 
     # =========================================================
     # [PAPER] Modified Q-Sampling (Eq. 6-11)
@@ -143,19 +149,15 @@ class SegRefinerSemantic(SegRefiner):
 
     def q_sample(self, x_start, x_last, t, current_device):
         """
-        Modified Q-Sampling theo Eq. 6-11 của bài báo.
+        Modified Q-Sampling theo Eq. 6-11 của bài báo (phiên bản 4).
 
         Ablation flags (đặt trong config → noise_components):
-            use_m_obj      : dùng M_obj làm τ-term trong Eq.11
-            use_m_unc  : dùng M_unc_region * GT (uncertainty-based) làm (1-τ)-term trong Eq.11
-            use_modify_bnd : áp modify_boundary sau Eq.11
-
-        Tất cả intermediate maps luôn được tính đầy đủ để đảm bảo
-        gradient flow; flags chỉ kiểm soát đóng góp vào m_t cuối.
+            use_m_obj      : dùng M_obj làm τ-term trong Eq.11 (Object dynamic dropout)
+            use_m_unc      : dùng M_pixel làm (1-τ)-term trong Eq.11 (Pixel flipping)
+            use_modify_bnd : thêm M_bnd_t vào I_fused (Boundary dilation noise)
         """
-        T = self.num_timesteps  # = 6
-        # [SYNC] Dùng dải 0.3 -> 0.9 khớp hoàn toàn với vis script
-        q_ori_probs  = torch.linspace(0.3, 0.9, T).to(current_device)
+        T = self.num_timesteps
+        q_ori_probs = torch.tensor(self.betas_cumprod, device=current_device)
         beta_t_batch = q_ori_probs[t].reshape(-1, 1, 1, 1)  # (B,1,1,1)
 
         if self._cur_unc_map is None:
@@ -173,50 +175,57 @@ class SegRefinerSemantic(SegRefiner):
             unc_b  = unc_map[b:b+1]  if b < unc_map.shape[0]  else torch.zeros_like(gt_b)
             beta_b = beta_t_batch[b:b+1]
 
-            # ── Eq. 7: M_obj_t — luôn tính (Eq.7: per-object uncertainty) ─────
+            # ── Eq. 7: M_obj_t (Dynamic object dropout) ──────────────────────
             M_obj = self.generate_object_noise(gt_b, t_val, unc_map=unc_b)
 
-            # ── Eq. 6: M_unc_t — [SYNC] DILATION giảm dần ────────────────────
-            tau_unc    = 0.5
+            # ── Eq. 6: M_unc_t (Pixel uncertainty erosion) ───────────────────
+            tau_unc = 0.5
             unc_binary = (unc_b > tau_unc).float()
-            n_dilate   = 6 - t_val  # Sync vis: t=0->6, t=5->1
-            if n_dilate > 0 and unc_binary.sum() > 0:
+            n_erode = T - t_val
+            if n_erode > 0 and unc_binary.sum() > 0:
                 m_unc_t = unc_binary
-                for _ in range(n_dilate):
-                    m_unc_t = F.max_pool2d(m_unc_t, kernel_size=3, stride=1, padding=1)
-                M_unc_region = m_unc_t
+                for _ in range(n_erode):
+                    m_unc_t = 1.0 - F.max_pool2d(1.0 - m_unc_t, kernel_size=3, stride=1, padding=1)
+                M_unc = m_unc_t
             else:
-                M_unc_region = unc_binary
+                M_unc = unc_binary
 
-            # ── Eq. 9-10: M_pixel_applied = M_unc * GT ───────────────────────
-            M_pixel_applied = ((M_unc_region > 0.5) * gt_b).float()
+            # ── Eq. 5 + Eq. 8: M_bnd_t (Dilated boundary noise) ──────────────
+            gt_np = (gt_b[0, 0].cpu().numpy() * 255).astype(np.uint8)
+            if gt_np.sum() > 0:
+                M_bnd_coarse_np = self.my_modify_boundary(gt_np)
+                M_bnd_coarse = torch.from_numpy(M_bnd_coarse_np).to(current_device).float().unsqueeze(0).unsqueeze(0)
+            else:
+                M_bnd_coarse = torch.zeros_like(gt_b)
 
-            # ── Eq. 11: gate theo ablation flags ─────────────────────────────
+            n_bnd = t_val
+            if n_bnd > 0 and M_bnd_coarse.sum() > 0:
+                M_bnd = M_bnd_coarse
+                for _ in range(n_bnd):
+                    M_bnd = F.max_pool2d(M_bnd, kernel_size=3, stride=1, padding=1)
+            else:
+                M_bnd = M_bnd_coarse
+
+            # ── Eq. 9: I_fused = M_unc_t ∪ M_bnd_t ───────────────────────────
+            if self.use_modify_bnd:
+                I_fused = ((M_bnd > 0.5) | (M_unc > 0.5)).float()
+            else:
+                I_fused = (M_unc > 0.5).float()
+
+            # ── Eq. 10: M_pixel_t (Pixel flipping) ───────────────────────────
+            M_pixel = I_fused * (1.0 - gt_b) + (1.0 - I_fused) * gt_b
+
+            # ── Eq. 11: m_t = τ * M_obj_t + (1 - τ) * M_pixel_t ──────────────
             if not self.use_m_obj and not self.use_m_unc:
-                # [NEW] Nếu tắt cả obj và unc, dùng GT làm gốc để modify boundary
+                # Fallback nếu tắt cả hai
                 m_t = gt_b
             else:
-                m_obj_term     = M_obj           if self.use_m_obj     else torch.zeros_like(gt_b)
-                m_applied_term = M_pixel_applied if self.use_m_unc else torch.zeros_like(gt_b)
+                m_obj_term   = M_obj   if self.use_m_obj   else torch.zeros_like(gt_b)
+                m_pixel_term = M_pixel if self.use_m_unc   else torch.zeros_like(gt_b)
                 tau = (torch.rand_like(gt_b) < beta_b).float()
-                # [SYNC] Đảo vị trí: tau là xác suất lấy M_applied
-                m_t = tau * m_applied_term + (1 - tau) * m_obj_term
+                m_t = tau * m_obj_term + (1.0 - tau) * m_pixel_term
 
-            # [SYNC] Ultra-light boundary noise
-            noise_level = t_val / max(T - 1, 1)
-            mb_regional = 0.05 * noise_level
-            mb_sample   = 0.5
-            mb_iou      = 1.0 - 0.01 * noise_level
-            m_t_np = (m_t.detach().cpu().numpy()[0, 0] * 255).astype(np.uint8)
-            if self.use_modify_bnd and m_t_np.sum() > 0:
-                m_t_mb = modify_boundary(m_t_np,
-                                         regional_sample_rate=mb_regional,
-                                         sample_rate=mb_sample,
-                                         iou_target=mb_iou)
-            else:
-                m_t_mb = (m_t_np / 255).astype(np.uint8)   # skip / mask rỗng
-            m_t = torch.from_numpy(m_t_mb).to(current_device).float().unsqueeze(0).unsqueeze(0)
-
-            results.append(m_t)
+            coarse = (m_t >= 0.5).float()
+            results.append(coarse)
 
         return torch.cat(results, dim=0)
