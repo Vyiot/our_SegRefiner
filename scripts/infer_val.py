@@ -21,6 +21,9 @@ import sys
 import os.path as osp
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..')))
 
+import argparse
+from mmdet.utils import get_root_logger
+
 import cv2
 import numpy as np
 import torch
@@ -36,9 +39,10 @@ from mmdet.datasets import build_dataset
 from mmcv.parallel import collate, scatter
 
 ROOT_DIR         = osp.abspath(osp.join(osp.dirname(__file__), '..'))
-CONFIG_FILE      = osp.join(ROOT_DIR, 'work_dirs1/exp5_bnd/exp5_bnd.py')
-CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs1/exp5_bnd/best_model.pth')
-VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs1/exp5_bnd/vis_gmm_refine_val')
+CONFIG_FILE      = osp.join(ROOT_DIR, 'work_dirs1/exp4_all/exp4_all.py')
+CHECKPOINT       = osp.join(ROOT_DIR, 'work_dirs1/exp4_all/last.pth')
+VIS_DIR          = osp.join(ROOT_DIR, 'work_dirs1/exp4_all/vis_gmm_refine_val')
+LOG_FILE         = osp.join(ROOT_DIR, 'work_dirs1/exp4_all/infer_val.log')
 DEVICE           = 'cuda:0'
 BATCH_SIZE       = 1
 NUM_WORKERS      = 4
@@ -192,7 +196,8 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
 
     # ── Bước 1: GMM uncertainty từ RGB ──────────────────────────────────────
     unc_map = compute_gmm_uncertainty(img_rgb_np)   # (H,W) float32
-    print(f'  [Step1-GMM] unc_map: min={unc_map.min():.3f} max={unc_map.max():.3f} '
+    logger = get_root_logger()
+    logger.info(f'  [Step1-GMM] unc_map: min={unc_map.min():.3f} max={unc_map.max():.3f} '
           f'mean={unc_map.mean():.3f}  px>thr={((unc_map>UNC_THRESHOLD).mean()*100):.1f}%')
 
     # Chuyển unc_map sang tensor (1,1,H,W) — dùng làm fine_probs ban đầu cho Stage 2
@@ -232,17 +237,17 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
                 candidates.append((score, y1, x1, y2, x2))
 
     kept = nms_patches(candidates, MAX_LOCAL_PATCHES, NMS_IOU_THR)
-    print(f'  [Step2-NMS] candidates={len(candidates)}  kept_patches={len(kept)}')
+    logger.info(f'  [Step2-NMS] candidates={len(candidates)}  kept_patches={len(kept)}')
     if kept:
         scores = sorted([c[0] for c in candidates], reverse=True)[:len(kept)]
-        print(f'             patch scores (top): {[f"{s:.3f}" for s in scores[:5]]}')
+        logger.info(f'             patch scores (top): {[f"{s:.3f}" for s in scores[:5]]}')
 
     # ── Chuẩn bị tensor coarse mask (1,1,H,W) ───────────────────────────────
     c_tensor = torch.from_numpy(c_mask_np.astype(np.float32)).to(device)
     base_mask = c_tensor.unsqueeze(0).unsqueeze(0)   # (1,1,H,W)
 
     if not kept:
-        print('  [SKIP] Không có patch cần sửa → trả thẳng coarse mask')
+        logger.info('  [SKIP] Không có patch cần sửa → trả thẳng coarse mask')
         return c_mask_np.copy(), unc_map, []
 
     # ── Bước 3 & 4: Với mỗi patch, chạy 6 bước t=5→0 rồi blend ─────────────
@@ -263,7 +268,7 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
     for pidx, (y1, x1, y2, x2) in enumerate(kept):
         ph, pw = y2 - y1, x2 - x1
         coarse_mean_patch = float(base_mask[0, 0, y1:y2, x1:x2].mean().cpu())
-        print(f'  [Patch {pidx}] bbox=({y1},{x1},{y2},{x2})  coarse_mean={coarse_mean_patch:.3f}')
+        logger.info(f'  [Patch {pidx}] bbox=({y1},{x1},{y2},{x2})  coarse_mean={coarse_mean_patch:.3f}')
 
         img_patch  = img_tensor[:, :, y1:y2, x1:x2]
         mask_patch = base_mask[:, :, y1:y2, x1:x2]
@@ -287,14 +292,14 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
 
             if i == 0:
                 cur_x = cur_x.sigmoid()
-                print(f'    t={i}: logit_mean={x_mean_before:.4f} → sigmoid_mean={float(cur_x.mean()):.4f}'
+                logger.info(f'    t={i}: logit_mean={x_mean_before:.4f} → sigmoid_mean={float(cur_x.mean()):.4f}'
                       f'  fine_probs_mean={float(cur_fine_probs.mean()):.4f}')
             else:
                 # Bernoulli sampling theo công thức paper (Eq.11)
                 fine_map     = (torch.rand_like(cur_fine_probs) < cur_fine_probs).float()
                 pred_x_start = (cur_x >= 0).float()
                 cur_x        = pred_x_start * fine_map + mask_patch * (1 - fine_map)
-                print(f'    t={i}: logit_mean={x_mean_before:.4f} → x_mean={float(cur_x.mean()):.4f}'
+                logger.info(f'    t={i}: logit_mean={x_mean_before:.4f} → x_mean={float(cur_x.mean()):.4f}'
                       f'  fine_map%={float(fine_map.mean())*100:.1f}%'
                       f'  pred_x_start%={float(pred_x_start.mean())*100:.1f}%')
 
@@ -309,7 +314,7 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
         coarse_bin   = (mask_patch[:, :, :ph, :pw] >= 0.5).float()
         diff_added   = float(((refined_bin[:,:,:ph,:pw] == 1) & (coarse_bin == 0)).float().mean()) * 100
         diff_removed = float(((refined_bin[:,:,:ph,:pw] == 0) & (coarse_bin == 1)).float().mean()) * 100
-        print(f'    → refined_prob_mean={float(refined_prob.mean()):.4f}  '
+        logger.info(f'    → refined_prob_mean={float(refined_prob.mean()):.4f}  '
               f'added={diff_added:.1f}%  removed={diff_removed:.1f}%')
 
         # Weighted blend vào accum
@@ -328,7 +333,7 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
     # Tổng kết diff so với coarse
     total_added   = float(((result_np == 1) & (c_mask_np == 0)).mean()) * 100
     total_removed = float(((result_np == 0) & (c_mask_np == 1)).mean()) * 100
-    print(f'  [Blend-Final] total_added={total_added:.2f}%  total_removed={total_removed:.2f}%')
+    logger.info(f'  [Blend-Final] total_added={total_added:.2f}%  total_removed={total_removed:.2f}%')
 
     # Build vis_steps
     vis_steps = []
@@ -346,6 +351,15 @@ def infer_gmm_refine(model_obj, img_tensor, img_rgb_np, c_mask_np, device):
 # Main
 # ============================================================
 def main():
+    parser = argparse.ArgumentParser(description='Inference validation with logging')
+    parser.add_argument('--log-file', default=LOG_FILE, help='Path to log file')
+    args = parser.parse_args()
+
+    # Setup logger
+    if args.log_file:
+        os.makedirs(osp.dirname(osp.abspath(args.log_file)), exist_ok=True)
+    logger = get_root_logger(log_file=args.log_file)
+
     cfg = Config.fromfile(CONFIG_FILE)
 
     # Override dataset nếu VAL_DATA_ROOT được chỉ định
@@ -356,22 +370,22 @@ def main():
             if step.get('type') == 'LoadOEMCoarseMasks':
                 step['pseudolabel_dir'] = osp.join(VAL_DATA_ROOT, VAL_PSEUDO_DIR)
                 break
-        print(f'[Dataset Override] data_root = {VAL_DATA_ROOT}')
+        logger.info(f'[Dataset Override] data_root = {VAL_DATA_ROOT}')
 
     # Luôn override split_file (training dùng val_hard.txt, infer_val dùng val.txt)
     cfg.data.val.split_file = VAL_SPLIT_FILE
-    print(f'[Dataset Override] split_file = {VAL_SPLIT_FILE}')
-    print(f'[Dataset Override] pseudo     = {VAL_PSEUDO_DIR}/')
+    logger.info(f'[Dataset Override] split_file = {VAL_SPLIT_FILE}')
+    logger.info(f'[Dataset Override] pseudo     = {VAL_PSEUDO_DIR}/')
 
     # Build val dataset
     # Xóa vis cũ để tránh lẫn ảnh cũ
     if SAVE_VIS and osp.exists(VIS_DIR):
         import shutil
         shutil.rmtree(VIS_DIR)
-        print(f'Cleared old vis: {VIS_DIR}')
+        logger.info(f'Cleared old vis: {VIS_DIR}')
 
     val_dataset = build_dataset(cfg.data.val)
-    print(f'Val set: {len(val_dataset)} images')
+    logger.info(f'Val set: {len(val_dataset)} images')
 
     val_loader = DataLoader(
         val_dataset,
@@ -389,12 +403,12 @@ def main():
     model.eval()
     model_obj = model.module if hasattr(model, 'module') else model
 
-    print(f'Loaded: {CHECKPOINT}')
-    print(f'num_timesteps = {model_obj.num_timesteps}')
-    print(f'betas_cumprod = {model_obj.betas_cumprod}')
-    print(f'UNC_THRESHOLD = {UNC_THRESHOLD}  (GMM-based)')
-    print(f'MAX_PATCHES   = {MAX_LOCAL_PATCHES}')
-    print(f'ALL_STEPS     = t=5→4→3→2→1→0 (6 bước)\n')
+    logger.info(f'Loaded: {CHECKPOINT}')
+    logger.info(f'num_timesteps = {model_obj.num_timesteps}')
+    logger.info(f'betas_cumprod = {model_obj.betas_cumprod}')
+    logger.info(f'UNC_THRESHOLD = {UNC_THRESHOLD}  (GMM-based)')
+    logger.info(f'MAX_PATCHES   = {MAX_LOCAL_PATCHES}')
+    logger.info(f'ALL_STEPS     = t=5→4→3→2→1→0 (6 bước)\n')
 
     # Mean/std để denormalize ảnh cho GMM
     mean_np = np.array([123.675, 116.28,  103.53 ]).reshape(1, 1, 3)
@@ -416,7 +430,7 @@ def main():
         if TARGET_IMAGE and _name != TARGET_IMAGE:
             continue
 
-        print(f'\n━━━ Image [{batch_idx+1}/{len(val_loader)}]  {_name} ━━━')
+        logger.info(f'\n━━━ Image [{batch_idx+1}/{len(val_loader)}]  {_name} ━━━')
         gpu_id   = int(DEVICE.split(':')[-1]) if ':' in DEVICE else 0
         data_gpu = scatter(data, [gpu_id])[0]
 
@@ -494,7 +508,7 @@ def main():
 
         _delta = _bld_ref - _bld_pseudo
         _sign  = '+' if _delta >= 0 else ''
-        print(f'  [IoU vs GT]  pseudo={_bld_pseudo:.2f}%  refined={_bld_ref:.2f}%  Δ={_sign}{_delta:.2f}%')
+        logger.info(f'  [IoU vs GT]  pseudo={_bld_pseudo:.2f}%  refined={_bld_ref:.2f}%  Δ={_sign}{_delta:.2f}%')
 
         # ── Visualization: 1 ảnh duy nhất chứa toàn bộ pipeline ────────────
         if SAVE_VIS:
@@ -567,7 +581,7 @@ def main():
         if (batch_idx + 1) % 50 == 0:
             b_run  = ri / max(ru,  1) * 100
             bg_run = ri_bg / max(ru_bg, 1) * 100
-            print(f'  [{batch_idx+1}/{len(val_loader)}]  '
+            logger.info(f'  [{batch_idx+1}/{len(val_loader)}]  '
                   f'bld={b_run:.2f}%  bg={bg_run:.2f}%  '
                   f'mIoU={(b_run+bg_run)/2:.2f}%')
 
@@ -588,20 +602,20 @@ def main():
             ['mIoU',       f'{miou*100:.2f}',        f'{pseudo_m*100:.2f}'],
             ['Δ vs Pseudo', f'{(miou-pseudo_m)*100:+.2f}', '-'],
         ]
-        print('\n' + AsciiTable(table_data).table)
+        logger.info('\n' + AsciiTable(table_data).table)
     except ImportError:
-        print(f'\n{"="*50}')
-        print(f'{"Mode":<18} {"bg IoU":>8} {"bld IoU":>9} {"mIoU":>7}')
-        print(f'{"-"*50}')
-        print(f'{"GMM-Refined":<18} {iou_bg*100:>8.2f} {iou_bld*100:>9.2f} {miou*100:>7.2f}')
-        print(f'{"Pseudo (input)":<18} {pseudo_bg*100:>8.2f} {pseudo_b*100:>9.2f} {pseudo_m*100:>7.2f}')
-        print(f'{"-"*50}')
-        print(f'Δ GMM vs Pseudo: {(miou-pseudo_m)*100:+.2f}%')
-        print(f'{"="*50}')
+        logger.info(f'\n{"="*50}')
+        logger.info(f'{"Mode":<18} {"bg IoU":>8} {"bld IoU":>9} {"mIoU":>7}')
+        logger.info(f'{"-"*50}')
+        logger.info(f'{"GMM-Refined":<18} {iou_bg*100:>8.2f} {iou_bld*100:>9.2f} {miou*100:>7.2f}')
+        logger.info(f'{"Pseudo (input)":<18} {pseudo_bg*100:>8.2f} {pseudo_b*100:>9.2f} {pseudo_m*100:>7.2f}')
+        logger.info(f'{"-"*50}')
+        logger.info(f'Δ GMM vs Pseudo: {(miou-pseudo_m)*100:+.2f}%')
+        logger.info(f'{"="*50}')
 
-    print(f'\nImages evaluated: {total_num}')
+    logger.info(f'\nImages evaluated: {total_num}')
     if SAVE_VIS:
-        print(f'Visualizations saved to: {VIS_DIR}')
+        logger.info(f'Visualizations saved to: {VIS_DIR}')
 
 
 if __name__ == '__main__':

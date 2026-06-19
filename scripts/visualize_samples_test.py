@@ -18,7 +18,7 @@ from scripts.infer_test import infer_gmm_refine
 # ============================================================
 # CONFIGURATION
 # ============================================================
-CONFIG_FILE = 'configs/segrefiner/exp8_all.py'
+CONFIG_FILE = 'configs/segrefiner/exp4_all.py'
 CHECKPOINT  = 'work_dirs/exp8_all/best_model3.pth'
 OUT_FILE    = 'work_dirs/exp8_all/comparison_3rows_test.png'
 
@@ -30,25 +30,25 @@ ROOT_DIR = '/home/ubuntu/vy/Denoiser'
 
 SAMPLES = [
     {
-        'name': 'mahe_48',
-        'img': 'OpenEarthMap_wo_xBD/mahe/images/mahe_48.tif',
-        'gt': 'OpenEarthMap_wo_xBD/mahe/labels/mahe_48.tif',
-        'pseudo': 'test_oem_raw/test_oem_raw/pseudolabels_binary/mahe_48.tif',
-        'baseline': 'infer_selected/raw/mahe_48.png'
+        'name': 'aachen_12',
+        'img': 'OpenEarthMap_wo_xBD/aachen/images/aachen_12.tif',
+        'gt': 'OpenEarthMap_wo_xBD/aachen/labels/aachen_12.tif',
+        'pseudo': 'test_oem_raw/test_oem_raw/pseudolabels_binary/aachen_12.tif',
+        'baseline': ''
     },
     {
-        'name': 'khartoum_16',
-        'img': 'OpenEarthMap_wo_xBD/khartoum/images/khartoum_16.tif',
-        'gt': 'OpenEarthMap_wo_xBD/khartoum/labels/khartoum_16.tif',
-        'pseudo': 'test_oem_raw/test_oem_raw/pseudolabels_binary/khartoum_16.tif',
-        'baseline': 'infer_selected/raw/khartoum_16.png'
+        'name': 'kyoto_27',
+        'img': 'OpenEarthMap_wo_xBD/kyoto/images/kyoto_27.tif',
+        'gt': 'OpenEarthMap_wo_xBD/kyoto/labels/kyoto_27.tif',
+        'pseudo': 'test_oem_raw/test_oem_raw/pseudolabels_binary/kyoto_27.tif',
+        'baseline': ''
     },
     {
-        'name': 'swietokrzyskie_11',
-        'img': 'OpenEarthMap_wo_xBD/swietokrzyskie/images/swietokrzyskie_11.tif',
-        'gt': 'OpenEarthMap_wo_xBD/swietokrzyskie/labels/swietokrzyskie_11.tif',
-        'pseudo': 'test_oem_raw/test_oem_raw/pseudolabels_binary/swietokrzyskie_11.tif',
-        'baseline': 'infer_selected/raw/swietokrzyskie_11.png'
+        'name': 'zanzibar_56',
+        'img': 'OpenEarthMap_wo_xBD/zanzibar/images/zanzibar_56.tif',
+        'gt': 'OpenEarthMap_wo_xBD/zanzibar/labels/zanzibar_56.tif',
+        'pseudo': 'test_oem_raw/test_oem_raw/pseudolabels_binary/zanzibar_56.tif',
+        'baseline': ''
     }
 ]
 
@@ -87,11 +87,6 @@ def main():
         gt_raw  = cv2.imread(osp.join(ROOT_DIR, s['gt']), cv2.IMREAD_GRAYSCALE)
         ps_raw  = cv2.imread(osp.join(ROOT_DIR, s['pseudo']), cv2.IMREAD_GRAYSCALE)
         
-        # Load baseline explicitly from SAMPLES
-        base_path = s.get('baseline', '')
-        base_raw = cv2.imread(osp.join(ROOT_DIR, base_path), cv2.IMREAD_GRAYSCALE) if base_path else None
-        if base_raw is None: base_raw = np.zeros_like(ps_raw) if ps_raw is not None else np.zeros((256, 256), dtype=np.uint8)
-
         # SegRefiner inference
         img_t = torch.from_numpy((img_raw - mean) / std).permute(2, 0, 1).float().unsqueeze(0).to(DEVICE)
         c_mask = (ps_raw > 0).astype(np.uint8)
@@ -102,7 +97,6 @@ def main():
         row = [
             to_t(img_raw, is_img=True),
             to_t(ps_raw),
-            to_t(base_raw),
             to_t(refined_np),
             get_diff_map(c_mask, refined_np),
             to_t(gt_raw)
@@ -110,7 +104,7 @@ def main():
         all_panels.extend(row)
 
     # Make Grid with minimal padding
-    grid = vutils.make_grid(all_panels, nrow=6, padding=16, pad_value=1.0)
+    grid = vutils.make_grid(all_panels, nrow=5, padding=16, pad_value=1.0)
     ndarr = grid.mul(255).clamp(0, 255).permute(1, 2, 0).to(torch.uint8).numpy()
     grid_im = Image.fromarray(ndarr)
     
@@ -131,7 +125,7 @@ def main():
     except:
         font = None
 
-    labels = ["RGB", "Pseudo(CISC-R)", "SegRefiner", "Our", "Refinement Map", "GT"]
+    labels = ["RGB", "Pseudo(CISC-R)", "Our", "Refinement Map", "GT"]
     S = 1024
     P = 16
     for i, lbl in enumerate(labels):
